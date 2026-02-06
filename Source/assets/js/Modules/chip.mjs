@@ -86,7 +86,7 @@ export function chip(element, obj) {
 		sec.inputs.forEach(input => {
 			let portType = 'object';
 			$.each(chip.portTypeDefinitions, function(key, value) {
-				if (input.ReadonlyType.toLowerCase().match(new RegExp(`\^${key}`, 'gm'))) {
+				if (input.ReadonlyType.toLowerCase().match(new RegExp(`\^${key}|list<${key}>`, 'gm'))) {
 					portType = value;
 					return false; // break loop
 				}
@@ -101,7 +101,7 @@ export function chip(element, obj) {
 		sec.outputs.forEach(output => {
 			let portType = 'object';
 			$.each(chip.portTypeDefinitions, function(key, value) {
-				if (output.ReadonlyType.toLowerCase().match(new RegExp(`\^${key}`, 'gm'))) {
+				if (output.ReadonlyType.toLowerCase().match(new RegExp(`\^${key}|list<${key}>`, 'gm'))) {
 					portType = value;
 					return false; // break loop
 				}
