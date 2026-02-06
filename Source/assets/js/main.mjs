@@ -46,7 +46,7 @@ $(function () {
 					size: 1
 				}
 				// chip.render(_.data.renderElement, _.data.selectedChipData, options);
-				// await chip.render(_.data.renderElement, 'And', options);
+				// await chip.render(_.data.renderElement, 'Circuit Board', options);
 				await chip.render(_.data.renderElement, $('#select-menu').val(), options);
 			}
 		}

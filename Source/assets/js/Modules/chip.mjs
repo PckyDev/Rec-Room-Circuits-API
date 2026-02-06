@@ -127,15 +127,20 @@ export const chip = {
 				'i': 'comment',
 				'Message Sender': 'event-sender',
 				'Message Receiver': 'event-receiver',
+				'Circuit Board': 'board'
 			},
 			nodes: []
 		};
 
-		let section = {
-			inputs: chip.NodeDescs[0].Inputs,
-			outputs: chip.NodeDescs[0].Outputs
-		};
-		_.nodes.push(section);
+		if (chip.NodeDescs.length !== 0) {
+			let section = {
+				inputs: chip.NodeDescs[0].Inputs,
+				outputs: chip.NodeDescs[0].Outputs
+			};
+			_.nodes.push(section);
+		} else {
+			_.nodes.push({ inputs: [], outputs: [] });
+		}
 
 		if (options.log) console.log({RenderElement: element, ChipObject: chip, ChipNodes: _.nodes[0], Options: options});
 
