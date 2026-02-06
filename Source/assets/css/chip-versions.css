@@ -126,7 +126,7 @@
 
 .chip.c-event-sender .ports {
   gap: 0;
-  padding: 1rem 0;
+  padding: .8rem 0 1rem 0;
 }
 
 .chip.c-event-sender .ports .section .output {
