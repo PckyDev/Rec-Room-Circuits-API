@@ -5,9 +5,6 @@ $(function () {
 		data: {
 			renderElement: null,
 			selectedChipData: null,
-			options: {
-				size: 1
-			}
 		},
 		init: async () => {
 			await _.load.circuitsv2();
@@ -17,21 +14,9 @@ $(function () {
 		},
 		load: {
 			circuitsv2: async () => {
-				// Get circuitsv2 json
-				const res = await fetch('https://raw.githubusercontent.com/tyleo-rec/CircuitsV2Resources/refs/heads/master/misc/circuitsv2.json');
-				const data = await res.json();
-				_.data.circuitsv2 = data;
-				// console.log('CircuitsV2 data loaded', _.data.circuitsv2);
-				
-				let converted = {};
-				$.each(_.data.circuitsv2.Nodes, async function (index, chip) {
-					if (chip.DeprecationStage !== 'Deprecated') {
-						let chipName = chip.ReadonlyPaletteName.replace(/\s/gm, '');
-						converted[chipName] = chip;
-					}
+				await chip.getAll(true).then(circuits => {
+					_.data.Circuits = circuits;
 				});
-				_.data.Circuits = converted;
-				// console.log('Converted CircuitsV2 data', _.data.Circuits);
 			},
 			renderElement: async () => {
 				_.data.renderElement = $('#render');
@@ -55,8 +40,14 @@ $(function () {
 			}
 		},
 		render: {
-			chip: () => {
-				chip(_.data.renderElement, _.data.selectedChipData, _.data.options);
+			chip: async () => {
+				const options = {
+					log: true,
+					size: 1
+				}
+				// chip.render(_.data.renderElement, _.data.selectedChipData, options);
+				// await chip.render(_.data.renderElement, 'And', options);
+				await chip.render(_.data.renderElement, $('#select-menu').val(), options);
 			}
 		}
 	}
