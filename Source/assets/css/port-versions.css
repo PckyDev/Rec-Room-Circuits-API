@@ -52,3 +52,11 @@
   transform: translateY(.125rem);
 }
 
+.input .port.p-string p::before {
+  content: "\"";
+}
+
+.input .port.p-string p::after {
+  content: "\"";
+}
+

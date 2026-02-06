@@ -2,6 +2,7 @@
   background-color: #7c7983;
   border-radius: .625rem;
   box-shadow: 0 0 1rem .5rem rgba(0,0,0,0.25);
+  font-family: 'Roboto';
 }
 
 .chip .header {
@@ -64,19 +65,19 @@
 .chip .ports .section .output .port-container .name, .chip .ports .section .input .port-container .name {
   color: white;
   margin: 0;
-  font-size: .85rem;
+  font-size: .75rem;
   transform: translateY(-.1rem);
   line-height: 1rem;
   opacity: .75;
 }
 
 .chip .ports .section .output .port-container .name {
-  padding: .2rem 1rem .2rem .5rem;
+  padding: .3rem 1rem 0rem .5rem;
   text-align: right;
 }
 
 .chip .ports .section .input .port-container .name {
-  padding: .2rem .5rem .2rem 1rem;
+  padding: .3rem .5rem 0rem 1rem;
   text-align: left;
   white-space: nowrap;
 }
@@ -87,12 +88,12 @@
 
 .chip .ports .section .output .port-container .port:not(.list) p, .chip .ports .section .input .port-container .port:not(.list) p {
   font-weight: 500;
-  font-size: .75rem;
+  font-size: .7rem;
   color: white;
   margin: 0;
   background-color: #7c7983;
   line-height: .75rem;
-  padding: .05rem .2rem .1rem .2rem;
+  padding: .1rem .2rem .1rem .2rem;
   white-space: nowrap;
 }
 
