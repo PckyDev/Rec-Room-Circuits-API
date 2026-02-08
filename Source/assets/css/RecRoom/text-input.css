@@ -1,0 +1,70 @@
+.rr-text-input {
+  position: relative;
+}
+
+.rr-text-input input {
+  font-family: 'Roboto';
+  display: block;
+  width: 100%;
+  padding: .375rem .75rem;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--rr-color-text-primary);
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: var(--rr-color-bg-secondary);
+  background-clip: padding-box;
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+  border-radius: calc(var(--rr-border-radius) * 1.5);
+}
+
+.rr-text-input input:focus {
+  outline: 0;
+}
+
+.rr-text-input input::placeholder {
+  color: var(--rr-color-text-tertiary);
+  opacity: 1;
+}
+
+/* INPUT BUTTONS */
+
+.rr-text-input .rr-input-btns {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: .25rem;
+  position: absolute;
+  top: calc(var(--rr-border-width) * 2);
+  right: calc(var(--rr-border-width) * 2);
+  height: calc(100% - (var(--rr-border-width) * 4));
+}
+
+.rr-text-input .rr-input-btns > div {
+  height: 100%;
+  transition: .2s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: .5rem;
+  background-color: var(--rr-color-bg-secondary);
+  border-radius: var(--rr-border-radius);
+  color: var(--rr-color-text-primary);
+}
+
+.rr-text-input .rr-input-btns > div.disabled {
+  opacity: .25;
+}
+
+.rr-text-input .rr-input-btns > div:not(.disabled):hover {
+  cursor: pointer;
+  background-color: var(--rr-color-bg-tertiary);
+}
+
+.rr-text-input .rr-input-btns > div:not(.disabled):active {
+  transition: 0.05s;
+  transform: scale(0.9);
+}
+

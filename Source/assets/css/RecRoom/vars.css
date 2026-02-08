@@ -1,0 +1,31 @@
+html.light {
+  --rr-color-orange: #ff6727;
+  --rr-color-gradient-light: #d97028;
+  --rr-color-gradient-dark: #d93e27;
+  --rr-color-bg-primary: #dad2c9;
+  --rr-color-bg-secondary: #dad6d1;
+  --rr-color-bg-tertiary: #dc854f;
+  --rr-color-outline: #d65f33;
+  --rr-color-text-primary: #3a3a40;
+  --rr-color-text-secondary: #5c5c66;
+  --rr-color-text-tertiary: #7e7e8c;
+}
+
+html.dark {
+  --rr-color-orange: #ff6727;
+  --rr-color-gradient-light: #222d36;
+  --rr-color-gradient-dark: #14202d;
+  --rr-color-bg-primary: #313538;
+  --rr-color-bg-secondary: #1c2931;
+  --rr-color-bg-tertiary: #2c2d34;
+  --rr-color-outline: #383b43;
+  --rr-color-text-primary: #eae8e4;
+  --rr-color-text-secondary: #b6b5b2;
+  --rr-color-text-tertiary: #838280;
+}
+
+html {
+  --rr-border-width: .125rem;
+  --rr-border-radius: .3125rem;
+}
+

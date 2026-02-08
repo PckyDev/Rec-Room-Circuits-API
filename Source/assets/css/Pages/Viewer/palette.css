@@ -1,0 +1,81 @@
+.palette {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 15rem;
+  height: 100vh;
+  background-color: var(--rr-color-bg-primary);
+  box-shadow: 0 0 1rem 0 rgba(0,0,0,0.125);
+  display: flex;
+  flex-direction: column;
+}
+
+.palette .head {
+  background-color: var(--rr-color-bg-tertiary);
+  border-bottom: var(--rr-border-width) solid var(--rr-color-outline);
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.palette .body {
+  height: 100%;
+  padding: 0 1rem;
+  overflow-y: auto;
+}
+
+.palette .body .row {
+  margin: 1rem 0;
+  gap: 1rem;
+}
+
+.palette .body .row .col {
+  transition: .2s;
+  padding: 0;
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+  border-radius: calc(var(--rr-border-radius) * 2);
+  padding: .5rem;
+  background-color: var(--rr-color-bg-tertiary);
+}
+
+.palette .body .row .col:hover {
+  cursor: pointer;
+  background-color: var(--rr-color-bg-secondary);
+}
+
+.palette .body .row .col#paletteChipTemplate {
+  cursor: wait;
+  opacity: .75;
+}
+
+.palette .body .row .col#paletteChipTemplate > div {
+  cursor: wait;
+  opacity: .75;
+}
+
+.palette .body .row .col#paletteChipTemplate p {
+  display: inline-block;
+  vertical-align: middle;
+  cursor: wait;
+  background-color: currentcolor;
+  opacity: .125;
+  border-radius: var(--rr-border-radius);
+}
+
+.palette .body .row .col > div {
+  background-color: var(--rr-color-outline);
+  border-radius: var(--rr-border-radius);
+  aspect-ratio: 16/9;
+  overflow: hidden;
+}
+
+.palette .body .row .col p {
+  margin: .5rem 0 .125rem 0;
+  font-family: 'Roboto';
+  font-size: .9rem;
+  font-weight: 500;
+  line-height: .9rem;
+  color: var(--rr-color-text-secondary);
+}
+

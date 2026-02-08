@@ -38,10 +38,10 @@ async function getJSON() {
 	return data.configs;
 }
 
-async function search(query) {
-	let jsonData = await getJSON(true);
+async function search(query, chipsJSON) {
+	let jsonData = chipsJSON || await getJSON(true);
 	let results = {};
-	query = query.toLowerCase();
+	query = query.toLowerCase().replace(/\s/gm, '');
 	$.each(jsonData, function(chipName, chipData) {
 		if (chipName.toLowerCase().match(new RegExp(`\^${query}`, 'gm'))) {
 			results[chipName] = chipData;
@@ -393,7 +393,8 @@ export const chip = {
 	async getAll() {
 		return await getJSON();
 	},
-	async search(query) {
-		return await search(query);
+	async search(query, chipsJSON) {
+		return await search(query, chipsJSON);
 	}
+
 }
