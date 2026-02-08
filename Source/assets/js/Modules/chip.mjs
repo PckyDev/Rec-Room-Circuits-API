@@ -362,8 +362,8 @@ export const chip = {
 		chipName = chipName.replace(/\s/gm, '');
 		return jsonData[chipName];
 	},
-	async getAll(converted) {
-		return await getJSON(converted);
+	async getAll() {
+		return await getJSON();
 	},
 	async search(query) {
 		return await search(query);
