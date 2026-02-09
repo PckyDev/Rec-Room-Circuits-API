@@ -449,7 +449,8 @@ export const chip = {
 				if ($(this).text() === '|') {
 					$(this).css('opacity', '0');
 				}
-			});
+			})
+			.attr('identifier', chip.chipName.toLowerCase().replace(/\s/g, ''));
 		
 		$(element)
 			.find('.chip')
@@ -492,11 +493,17 @@ export const chip = {
 			});
 		}
 
-		$(window).on('resize', function() {
-			autoFit();
-		});
+		if (options.autoFit) {
+			$("body")
+				.on('resize-' + chip.chipName.toLowerCase().replace(/\s/g, ''), function() {
+					autoFit();
+				})
+				.on('resize-chips', function() {
+					autoFit();
+				});
 
-		autoFit();
+			autoFit();
+		}
 	},
 	async get(chipName) {
 		let jsonData = await getJSON(true);

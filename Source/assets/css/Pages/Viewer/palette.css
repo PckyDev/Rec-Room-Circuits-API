@@ -2,7 +2,7 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 15rem;
+  width: 240px;
   height: 100vh;
   background-color: var(--rr-color-bg-primary);
   box-shadow: 0 0 1rem 0 rgba(0,0,0,0.125);
@@ -21,16 +21,26 @@
 
 .palette .body {
   height: 100%;
-  padding: 0 1rem;
+  padding: 0 .5rem;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.palette .body::-webkit-scrollbar {
+  display: none;
 }
 
 .palette .body .row {
   margin: 1rem 0;
-  gap: 1rem;
+  /*gap: 1rem;*/
 }
 
 .palette .body .row .col {
+  padding: .5rem;
+}
+
+.palette .body .row .col > div {
   transition: .2s;
   padding: 0;
   border: var(--rr-border-width) solid var(--rr-color-outline);
@@ -39,14 +49,9 @@
   background-color: var(--rr-color-bg-tertiary);
 }
 
-.palette .body .row .col:hover {
+.palette .body .row .col > div:hover {
   cursor: pointer;
   background-color: var(--rr-color-bg-secondary);
-}
-
-.palette .body .row .col#paletteChipTemplate {
-  cursor: wait;
-  opacity: .75;
 }
 
 .palette .body .row .col#paletteChipTemplate > div {
@@ -54,7 +59,12 @@
   opacity: .75;
 }
 
-.palette .body .row .col#paletteChipTemplate p {
+.palette .body .row .col#paletteChipTemplate > div > div {
+  cursor: wait;
+  opacity: .75;
+}
+
+.palette .body .row .col#paletteChipTemplate > div p {
   display: inline-block;
   vertical-align: middle;
   cursor: wait;
@@ -63,19 +73,31 @@
   border-radius: var(--rr-border-radius);
 }
 
-.palette .body .row .col > div {
+.palette .body .row .col > div > div {
   background-color: var(--rr-color-outline);
   border-radius: var(--rr-border-radius);
   aspect-ratio: 16/9;
   overflow: hidden;
 }
 
-.palette .body .row .col p {
+.palette .body .row .col > div > p {
   margin: .5rem 0 .125rem 0;
   font-family: 'Roboto';
   font-size: .9rem;
   font-weight: 500;
   line-height: .9rem;
   color: var(--rr-color-text-secondary);
+}
+
+.palette .resizeBar {
+  position: absolute;
+  top: 0;
+  right: -.125rem;
+  height: 100%;
+  width: .25rem;
+}
+
+.palette .resizeBar:hover {
+  cursor: col-resize;
 }
 

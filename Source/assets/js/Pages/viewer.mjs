@@ -15,16 +15,11 @@ $(function () {
 			await chip.getAll({ combineResults: true }).then(data => {
 				_.data.chipsJSON = data;
 			});
+			await _.palette.init();
 			// console.log('Testing chip search for "Trigger"...');
 			// await chip.search('Trigger', { chipsJSON: _.data.chipsJSON, combineResults: true }).then(data => {
 			// 	console.log('Search results for "Trigger":', data);
 			// });
-			await _.palette.load.templates();
-			await _.palette.load.chips();
-			await _.palette.load.searchInput();
-			// await _.load.renderElement();
-			// await _.load.selectMenu();
-			// _.render.chip();
 		},
 		palette: {
 			data: {
@@ -37,9 +32,65 @@ $(function () {
 						}
 					}
 				},
+				resizeCols: [
+					{
+						min: 0,
+						max: 350,
+						chipsPerRow: 1
+					},
+					{
+						min: 351,
+						max: 600,
+						chipsPerRow: 2
+					},
+					{
+						min: 601,
+						max: 800,
+						chipsPerRow: 3
+					},
+					{
+						min: 801,
+						max: 1000,
+						chipsPerRow: 4
+					},
+					{
+						min: 1001,
+						max: 1200,
+						chipsPerRow: 5
+					}
+				],
 				paletteChipsContainerId: 'paletteChipsContainer',
 				chipPaletteRenderId: 'chipPaletteRender',
 				searchInputId: 'paletteSearchInput',
+				paletteWindowId: 'paletteWindow',
+				paletteResizeBarId: 'paletteResizeBar',
+			},
+			init: async () => {
+				await _.palette.load.templates();
+				await _.palette.load.chips();
+				await _.palette.load.searchInput();
+				await _.palette.load.resizeBar();
+			},
+			functions: {
+				resize: async (newWidth) => {
+					const paletteWindow = $('#' + _.palette.data.paletteWindowId);
+					const minWidth = 240;
+					const maxWidth = $(window).width() - 2;
+
+					if (newWidth < minWidth) newWidth = minWidth;
+					if (newWidth > maxWidth) newWidth = maxWidth;
+					paletteWindow.css('width', newWidth + 'px');
+
+					const chipsContainer = $('#' + _.palette.data.paletteChipsContainerId);
+					const classTemplate = 'row row-cols-{{chipsPerRow}}';
+					$.each(_.palette.data.resizeCols, function (index, colData) {
+						if (newWidth >= colData.min && newWidth <= colData.max) {
+							chipsContainer.attr('class', classTemplate.replace('{{chipsPerRow}}', colData.chipsPerRow));
+							return false; // break loop
+						}
+					});
+					$('body').trigger('resize-chips');
+				}
 			},
 			load: {
 				templates: async () => {
@@ -96,7 +147,7 @@ $(function () {
 
 										const chipName = target.dataset.chipName;
 										const chipData = chipsJSON[chipName];
-										await chip.render($(target), chipData, { size: 0.5, log: false });
+										await chip.render($(target), chipData, { size: 1, log: false });
 									}
 								},
 								{
@@ -131,7 +182,7 @@ $(function () {
 							observer.observe(chipPaletteRender[0]);
 						} else {
 							// Fallback: no IntersectionObserver support -> render immediately
-							await chip.render(chipPaletteRender, chipData, { size: 0.5, log: false });
+							await chip.render(chipPaletteRender, chipData, { size: 1, log: false });
 							chipPaletteRender[0].dataset.rendered = 'true';
 						}
 
@@ -146,6 +197,27 @@ $(function () {
 					searchInput.on('input', function () {
 						const query = $(this).val().trim();
 						_.palette.load.chips(query);
+					});
+				},
+				resizeBar: async () => {
+					const resizeBar = $('#' + _.palette.data.paletteResizeBarId);
+					let isResizing = false;
+
+					resizeBar.on('mousedown', function (e) {
+						e.preventDefault();
+						isResizing = true;
+					});
+
+					$(document).on('mousemove', function (e) {
+						if (!isResizing) return;
+						const newWidth = e.clientX;
+						_.palette.functions.resize(newWidth);
+					});
+
+					$(document).on('mouseup', function () {
+						if (isResizing) {
+							isResizing = false;
+						}
 					});
 				}
 			},

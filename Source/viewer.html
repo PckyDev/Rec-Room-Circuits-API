@@ -18,7 +18,7 @@
 <body>
     <section class="viewer">
         <div id="render" class="render"></div>
-        <div class="palette">
+        <div id="paletteWindow" class="palette">
             <div class="head">
                 <div class="rr-text-input"><input type="text" id="paletteSearchInput" placeholder="Search Palette...">
                     <div class="rr-input-btns">
@@ -32,27 +32,38 @@
             <div class="body">
                 <div class="row row-cols-1" id="paletteChipsContainer">
                     <div class="col" id="paletteChipTemplate">
-                        <div id="chipPaletteRender"></div>
-                        <p>{{paletteName}}</p>
+                        <div>
+                            <div id="chipPaletteRender"></div>
+                            <p>{{paletteName}}</p>
+                        </div>
                     </div>
                     <div class="col" id="paletteChipTemplate">
-                        <div id="chipPaletteRender"></div>
-                        <p>{{paletteName}}</p>
+                        <div>
+                            <div id="chipPaletteRender"></div>
+                            <p>{{paletteName}}</p>
+                        </div>
                     </div>
                     <div class="col" id="paletteChipTemplate">
-                        <div id="chipPaletteRender"></div>
-                        <p>{{paletteName}}</p>
+                        <div>
+                            <div id="chipPaletteRender"></div>
+                            <p>{{paletteName}}</p>
+                        </div>
                     </div>
                     <div class="col" id="paletteChipTemplate">
-                        <div id="chipPaletteRender"></div>
-                        <p>{{paletteName}}</p>
+                        <div>
+                            <div id="chipPaletteRender"></div>
+                            <p>{{paletteName}}</p>
+                        </div>
                     </div>
                     <div class="col" id="paletteChipTemplate">
-                        <div id="chipPaletteRender"></div>
-                        <p>{{paletteName}}</p>
+                        <div>
+                            <div id="chipPaletteRender"></div>
+                            <p>{{paletteName}}</p>
+                        </div>
                     </div>
                 </div>
             </div>
+            <div id="paletteResizeBar" class="resizeBar"></div>
         </div>
     </section>
     <script src="assets/js/jquery.min.js"></script>
