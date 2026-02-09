@@ -16,6 +16,7 @@ $(function () {
 				_.data.chipsJSON = data;
 			});
 			await _.palette.init();
+			await _.graph.init();
 			// console.log('Testing chip search for "Trigger"...');
 			// await chip.search('Trigger', { chipsJSON: _.data.chipsJSON, combineResults: true }).then(data => {
 			// 	console.log('Search results for "Trigger":', data);
@@ -188,7 +189,8 @@ $(function () {
 
 						// Load click event for chips
 						chipElement.on('click', async function () {
-							await chip.render($('#render'), chipData, { size: 1, log: true });
+							// await chip.render($('#render'), chipData, { size: 1, log: true });
+							await _.graph.functions.addNode(chipData);
 						});
 					}
 				},
@@ -221,6 +223,212 @@ $(function () {
 					});
 				}
 			},
+		},
+		graph: {
+			data: {
+				elements: {
+					graphCanvasViewport: {
+						id: 'graphCanvasViewport',
+						element: null
+					},
+					graphCanvas: {
+						id: 'graphCanvas',
+						element: null,
+					}
+				},
+				cameraState: {
+					tx: 0,
+					ty: 0,
+					scale: 1,
+					minScale: 0.15,
+					maxScale: 6,
+					dragging: false,
+					lastX: 0,
+					lastY: 0
+				},
+				BASE_MAJOR: 100,
+				BASE_MINOR: 25,
+				rafPending: false,
+				nodes: [],
+			},
+			init: async () => {
+				// Load element references
+				await _.graph.load.elements();
+
+				// Initialize interaction handlers
+				$.each(_.graph.load.interaction, function (interactionName, interactionFunction) {
+					interactionFunction();
+				});
+
+				// Start centered
+				const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+				if (vpEl) {
+					_.graph.data.cameraState.tx = vpEl.clientWidth * 0.5;
+					_.graph.data.cameraState.ty = vpEl.clientHeight * 0.5;
+				}
+				_.graph.functions.requestRender();
+
+				// For testing: add a node to the center of the graph
+				// await _.graph.functions.addNode('Add Tag');
+			},
+			functions: {
+				clamp: (v, a, b) => {
+					return Math.max(a, Math.min(b, v));
+				},
+				requestRender: () => {
+					if (_.graph.data.rafPending) return;
+					_.graph.data.rafPending = true;
+					requestAnimationFrame(() => _.graph.functions.render());
+				},
+				screenToWorld: (sx, sy) => {
+					return {
+						x: (sx - _.graph.data.cameraState.tx) / _.graph.data.cameraState.scale,
+						y: (sy - _.graph.data.cameraState.ty) / _.graph.data.cameraState.scale
+					};
+				},
+				render: () => {
+					_.graph.data.rafPending = false;
+
+					const canvasEl = _.graph.data.elements.graphCanvas.element;
+					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+
+					if (canvasEl) {
+						// Apply world transform (everything inside pans/zooms together)
+						canvasEl.style.transform = `translate(${_.graph.data.cameraState.tx}px, ${_.graph.data.cameraState.ty}px) scale(${_.graph.data.cameraState.scale})`;
+					}
+
+					if (!vpEl) return;
+
+					// Update grid to match camera (in screen px)
+					const majorPx = _.graph.data.BASE_MAJOR * _.graph.data.cameraState.scale;
+					const minorPx = _.graph.data.BASE_MINOR * _.graph.data.cameraState.scale;
+
+					// Keep grid stable with positive modulo (avoid jitter when panning negative)
+					const mod = (n, m) => ((n % m) + m) % m;
+
+					vpEl.style.setProperty('--major', `${majorPx}px`);
+					vpEl.style.setProperty('--minor', `${minorPx}px`);
+					vpEl.style.setProperty('--grid-x', `${mod(_.graph.data.cameraState.tx, majorPx)}px`);
+					vpEl.style.setProperty('--grid-y', `${mod(_.graph.data.cameraState.ty, majorPx)}px`);
+				},
+				addNode: async (node) => {
+					let nodeHTML = await chip.render(null, node, { log: false, autoFit: false });
+					if (nodeHTML) {
+					nodeHTML = nodeHTML.replace('class="chip', 'id="node-' + _.graph.data.nodes.length + '" class="chip');
+						$(_.graph.data.elements.graphCanvas.element).append(nodeHTML);
+						const nodeElement = $(_.graph.data.elements.graphCanvas.element).find('#node-' + _.graph.data.nodes.length);
+						const nodeObject = {
+							id: 'node-' + _.graph.data.nodes.length,
+							element: nodeElement,
+						}
+						_.graph.data.nodes.push(nodeObject);
+
+						// Set position of new node to center of viewport
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (vpEl) {
+							const centerX = (vpEl.clientWidth * 0.5 - _.graph.data.cameraState.tx) / _.graph.data.cameraState.scale;
+							const centerY = (vpEl.clientHeight * 0.5 - _.graph.data.cameraState.ty) / _.graph.data.cameraState.scale;
+							nodeElement.css('left', centerX + 'px');
+							nodeElement.css('top', centerY + 'px');
+						}
+					} else {
+						console.warn('Failed to render chip for node:', node);
+					}
+				}
+			},
+			load: {
+				elements: async () => {
+					$.each(_.graph.data.elements, function (elementName, elementData) {
+						const element = document.getElementById(elementData.id);
+						if (element) {
+							elementData.element = element;
+						} else {
+							console.warn('Graph element with id "' + elementData.id + '" not found.');
+						}
+					});
+				},
+				interaction: {
+					middleMousePan: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						$(vpEl).on('mousedown', function (e) {
+							if (e.which !== 2) return; // Only middle mouse button
+							e.preventDefault();
+							_.graph.data.cameraState.dragging = true;
+							_.graph.data.cameraState.lastX = e.clientX;
+							_.graph.data.cameraState.lastY = e.clientY;
+							vpEl.classList.add('grabbing');
+						});
+
+						$(window).on('mousemove', function (e) {
+							if (!_.graph.data.cameraState.dragging) return;
+							const dx = e.clientX - _.graph.data.cameraState.lastX;
+							const dy = e.clientY - _.graph.data.cameraState.lastY;
+							_.graph.data.cameraState.lastX = e.clientX;
+							_.graph.data.cameraState.lastY = e.clientY;
+							_.graph.data.cameraState.tx += dx;
+							_.graph.data.cameraState.ty += dy;
+							_.graph.functions.requestRender();
+						});
+
+						$(window).on('mouseup', function (e) {
+							if (!_.graph.data.cameraState.dragging) return;
+							_.graph.data.cameraState.dragging = false;
+							vpEl.classList.remove('grabbing');
+						});
+					},
+					preventBrowserMiddleClick: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						$(vpEl).on('click', function (e) {
+							if (e.which === 2) {
+								e.preventDefault();
+							}
+						});
+					},
+					wheelZoomAroundCursor: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						vpEl.addEventListener('wheel', (e) => {
+							e.preventDefault();
+
+							const rect = vpEl.getBoundingClientRect();
+							const mx = e.clientX - rect.left;
+							const my = e.clientY - rect.top;
+
+							// World point under cursor before zoom
+							const before = _.graph.functions.screenToWorld(mx, my);
+
+							// Exponential zoom feels right
+							const zoomSpeed = 0.0015;
+							const zoomFactor = Math.exp(-e.deltaY * zoomSpeed);
+
+							_.graph.data.cameraState.scale = _.graph.functions.clamp(
+								_.graph.data.cameraState.scale * zoomFactor,
+								_.graph.data.cameraState.minScale,
+								_.graph.data.cameraState.maxScale
+							);
+
+							// Recompute translation so 'before' stays under the cursor
+							_.graph.data.cameraState.tx = mx - before.x * _.graph.data.cameraState.scale;
+							_.graph.data.cameraState.ty = my - before.y * _.graph.data.cameraState.scale;
+
+							_.graph.functions.requestRender();
+						}, { passive: false });
+					},
+					disableContextMenu: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						vpEl.addEventListener('contextmenu', (e) => {
+							e.preventDefault();
+						});
+					}
+				}
+			}
 		},
 		load: {
 			renderElement: async () => {

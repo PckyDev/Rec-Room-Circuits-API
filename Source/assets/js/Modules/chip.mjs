@@ -177,7 +177,7 @@ export const chip = {
 	},
 	async render(element, chip, opt) {
 
-		if (!element || !chip) {
+		if (!chip) {
 			console.error('Element and chip parameters are required to render a chip.');
 			return;
 		}
@@ -436,73 +436,78 @@ export const chip = {
 		let chipHTML = _.templates.chip
 			.replace('{{chipType}}', chipType)
 			.replace('{{chipTitle}}', chip.chipName)
-			.replace('{{portSections}}', portSectionsHTML);
+			.replace('{{portSections}}', portSectionsHTML)
+			.replaceAll('class="name">|<', 'class="name" style="opacity: 0;">|<');
 
-		$(element)
-			.html(`${chipHTML}`)
-			.css({
-				'display': 'flex',
-				'justify-content': 'center',
-				'align-items': 'center'
-			})
-			.find('.port-container .name').each(function() {
-				if ($(this).text() === '|') {
-					$(this).css('opacity', '0');
-				}
-			})
-			.attr('identifier', chip.chipName.toLowerCase().replace(/\s/g, ''));
-		
-		$(element)
-			.find('.chip')
+		if (element) {
+			$(element)
+				.html(`${chipHTML}`)
 				.css({
-					'transform': `scale(${options.size})`,
+					'display': 'flex',
+					'justify-content': 'center',
+					'align-items': 'center'
 				})
-
-		function autoFit() {
-			if (!options.autoFit) return;
-
-			const $chip = $(element).find('.chip');
-			if ($chip.length === 0) return;
-
-			let containerWidth = $(element).width();
-			let padding = 50; // extra space to prevent overflow
-
-			// Keep padding on BOTH sides.
-			const availableWidth = Math.max(0, containerWidth - (padding * 2));
-
-			// Start from the desired scale.
-			const baseScale = options.size;
-			$chip.css({
-				'transform': `scale(${baseScale})`,
-			});
-
-			// getBoundingClientRect() already includes the current transform scale,
-			// so do NOT multiply by scale again.
-			const rect = $chip[0].getBoundingClientRect();
-			const renderedWidth = rect.width;
-
-			if (renderedWidth <= 0 || availableWidth <= 0) return;
-
-			// Only scale down if needed (keep the requested size otherwise).
-			const fitScale = renderedWidth > availableWidth
-				? baseScale * (availableWidth / renderedWidth)
-				: baseScale;
-
-			$chip.css({
-				'transform': `scale(${fitScale})`,
-			});
-		}
-
-		if (options.autoFit) {
-			$("body")
-				.on('resize-' + chip.chipName.toLowerCase().replace(/\s/g, ''), function() {
-					autoFit();
+				.find('.port-container .name').each(function() {
+					if ($(this).text() === '|') {
+						$(this).css('opacity', '0');
+					}
 				})
-				.on('resize-chips', function() {
-					autoFit();
+				.attr('identifier', chip.chipName.toLowerCase().replace(/\s/g, ''));
+			
+			$(element)
+				.find('.chip')
+					.css({
+						'transform': `scale(${options.size})`,
+					})
+
+			function autoFit() {
+				if (!options.autoFit) return;
+
+				const $chip = $(element).find('.chip');
+				if ($chip.length === 0) return;
+
+				let containerWidth = $(element).width();
+				let padding = 50; // extra space to prevent overflow
+
+				// Keep padding on BOTH sides.
+				const availableWidth = Math.max(0, containerWidth - (padding * 2));
+
+				// Start from the desired scale.
+				const baseScale = options.size;
+				$chip.css({
+					'transform': `scale(${baseScale})`,
 				});
 
-			autoFit();
+				// getBoundingClientRect() already includes the current transform scale,
+				// so do NOT multiply by scale again.
+				const rect = $chip[0].getBoundingClientRect();
+				const renderedWidth = rect.width;
+
+				if (renderedWidth <= 0 || availableWidth <= 0) return;
+
+				// Only scale down if needed (keep the requested size otherwise).
+				const fitScale = renderedWidth > availableWidth
+					? baseScale * (availableWidth / renderedWidth)
+					: baseScale;
+
+				$chip.css({
+					'transform': `scale(${fitScale})`,
+				});
+			}
+
+			if (options.autoFit) {
+				$("body")
+					.on('resize-' + chip.chipName.toLowerCase().replace(/\s/g, ''), function() {
+						autoFit();
+					})
+					.on('resize-chips', function() {
+						autoFit();
+					});
+
+				autoFit();
+			}
+		} else {
+			return chipHTML;
 		}
 	},
 	async get(chipName) {

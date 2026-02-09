@@ -9,15 +9,17 @@
     <link rel="stylesheet" href="assets/css/Roboto.css">
     <link rel="stylesheet" href="assets/css/bss-overrides.css">
     <link rel="stylesheet" href="assets/css/other.css">
+    <link rel="stylesheet" href="assets/css/Pages/Viewer/editor.css">
     <link rel="stylesheet" href="assets/css/Pages/Viewer/palette.css">
-    <link rel="stylesheet" href="assets/css/Pages/Viewer/viewer.css">
     <link rel="stylesheet" href="assets/css/RecRoom/text-input.css">
     <link rel="stylesheet" href="assets/css/RecRoom/vars.css">
 </head>
 
 <body>
-    <section class="viewer">
-        <div id="render" class="render"></div>
+    <section class="editor">
+        <div id="graphCanvasViewport" class="graph-viewport">
+            <div id="graphCanvas" class="graph-canvas"></div>
+        </div>
         <div id="paletteWindow" class="palette">
             <div class="head">
                 <div class="rr-text-input"><input type="text" id="paletteSearchInput" placeholder="Search Palette...">

@@ -1,0 +1,39 @@
+.editor {
+  display: flex;
+  height: 100vh;
+  background-color: var(--rr-color-gradient-light);
+}
+
+.editor .graph-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  --minor: 25px;
+  --major: 100px;
+  --grid-x: 0px;
+  --grid-y: 0px;
+  background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.05) 0 1px, transparent 1px var(--minor)), repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 1px, transparent 1px var(--minor)), repeating-linear-gradient(0deg, rgba(255,255,255,0.10) 0 1px, transparent 1px var(--major)), repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0 1px, transparent 1px var(--major));
+  background-position: var(--grid-x) var(--grid-y), var(--grid-x) var(--grid-y), var(--grid-x) var(--grid-y), var(--grid-x) var(--grid-y);
+}
+
+.editor .graph-viewport.grabbing {
+  cursor: grabbing;
+}
+
+.editor .graph-viewport .graph-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.editor .graph-viewport .graph-canvas .chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
