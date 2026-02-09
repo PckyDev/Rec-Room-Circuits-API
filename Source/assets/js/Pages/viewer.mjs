@@ -7,13 +7,18 @@ $(function () {
 		data: {
 			renderElement: null,
 			selectedChipData: null,
+			chipsJSON: {}
 		},
 		init: async () => {
 			await ui.init.inputs();
 			await chip.init();
-			await chip.getAll().then(chips => {
-				_.data.Circuits = chips;
+			await chip.getAll({ combineResults: true }).then(data => {
+				_.data.chipsJSON = data;
 			});
+			// console.log('Testing chip search for "Trigger"...');
+			// await chip.search('Trigger', { chipsJSON: _.data.chipsJSON, combineResults: true }).then(data => {
+			// 	console.log('Search results for "Trigger":', data);
+			// });
 			await _.palette.load.templates();
 			await _.palette.load.chips();
 			await _.palette.load.searchInput();
@@ -42,7 +47,6 @@ $(function () {
 						const templateElement = $('#' + templateData.id);
 						if (templateElement.length > 0) {
 							templateData.html = templateElement[0].outerHTML.replace('id="' + templateData.id + '"', '').trim();
-							console.log(templateData.html);
 							const children = templateElement.parent().children();
 							children.each(function () {
 								if (this.id === templateData.id) {
@@ -55,15 +59,16 @@ $(function () {
 					});
 				},
 				chips: async (query) => {
-					if (!_.data.Circuits) {
-						_.data.Circuits = await chip.getAll();
+					if (!_.data.chipsJSON || Object.keys(_.data.chipsJSON).length === 0) {
+						_.data.chipsJSON = await chip.getAll();
 					}
 
-					let chipsJSON = _.data.Circuits;
+					let chipsJSON = _.data.chipsJSON;
 					
 					if (query) {
-						chipsJSON = await chip.search(query, _.data.Circuits);
+						chipsJSON = await chip.search(query, { chipsJSON: _.data.chipsJSON, combineResults: true });
 					}
+					// console.log('Chips to display:', chipsJSON);
 
 					const chipsContainer = $('#' + _.palette.data.paletteChipsContainerId);
 					chipsContainer.html('');

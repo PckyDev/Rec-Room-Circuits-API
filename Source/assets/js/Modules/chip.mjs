@@ -2,6 +2,7 @@ const _ = {
 	repo: {
 		mainUrl: 'https://raw.githubusercontent.com/PckyDev/Rec-Room-Circuits-Viewer/refs/heads/main/',
 		circuitsDataPath: 'Circuits%20Data/CV2_ChipConfigs.json',
+		objectsDataPath: 'Circuits%20Data/CV2_ObjectConfigs.json',
 		css: {
 			basePath: 'Source/assets/css/Chip/',
 			files: [
@@ -16,37 +17,134 @@ const _ = {
 }
 
 async function getInfo() {
-	const res = await fetch(`${_.repo.mainUrl}${_.repo.circuitsDataPath}`);
-	const data = await res.json();
-	const getProperties = ['exportedAtUtc', 'sourceFolder', 'configuredSourceFolder', 'sourceFolderUsedFallback', 'count'];
+	const circuits = await fetch(`${_.repo.mainUrl}${_.repo.circuitsDataPath}`);
+	const circuitsData = await circuits.json();
+
+	const objects = await fetch(`${_.repo.mainUrl}${_.repo.objectsDataPath}`);
+	const objectsData = await objects.json();
+
+	let data = {
+		chips: circuitsData,
+		objects: objectsData,
+	};
+
+	const getProperties = {
+		chips: [ 'exportedAtUtc', 'sourceFolder', 'configuredSourceFolder', 'sourceFolderUsedFallback', 'count' ],
+		objects: [ 'updatedAtUtc', 'count' ]
+	};	
+
 	let info = {};
-	getProperties.forEach(prop => {
-		if (prop === 'exportedAtUtc') {
-			let date = new Date(data[prop]);
-			info[prop] = date.toLocaleString();
-		} else {
-			info[prop] = data[prop];
-		}
+
+	$.each(data, function(key, value) {
+		info[key] = {};
+		getProperties[key].forEach(prop => {
+			if (prop.toLowerCase().includes('date') || prop.toLowerCase().includes('time') || prop.toLowerCase().includes('utc')) {
+				let date = new Date(value[prop]);
+				info[key][prop] = date.toLocaleString();
+			} else {
+				info[key][prop] = value[prop];
+			}
+		});
 	});
+
 	return info;
 }
 
-async function getJSON() {
-	const res = await fetch(`${_.repo.mainUrl}${_.repo.circuitsDataPath}`);
-	const data = await res.json();
-	
-	return data.configs;
+async function combineJSON(chipsOpt, objectsOpt) {
+	const chips = chipsOpt || await getJSON().then(data => data.chips);
+	const objects = objectsOpt || await getJSON().then(data => data.objects);
+
+	let combined = {};
+
+	$.each(chips, function(chipName, chipData) {
+		combined[chipName] = chipData;
+	});
+
+	$.each(objects, function(objectName, objectData) {
+		if (objectName in combined) {
+			console.warn(`Name conflict for "${objectName}". Object will overwrite chip with the same name in combined results.`);
+		}
+		combined[objectName] = objectData;
+	});
+
+	return combined;
 }
 
-async function search(query, chipsJSON) {
-	let jsonData = chipsJSON || await getJSON(true);
+async function getJSON(opt) {
+
+	const options = {
+		combineResults: opt?.combineResults || false,
+	}
+
+	const circuits = await fetch(`${_.repo.mainUrl}${_.repo.circuitsDataPath}`);
+	const circuitsData = await circuits.json();
+
+	const objects = await fetch(`${_.repo.mainUrl}${_.repo.objectsDataPath}`);
+	const objectsData = await objects.json();
+
+	let data = {
+		chips: circuitsData.configs,
+		objects: objectsData.configs
+	};
+
+	if (options.combineResults) {
+		await combineJSON(data.chips, data.objects).then(combinedData => {
+			data = combinedData;
+		});
+	}
+	
+	return data;
+}
+
+async function search(query, opt) {
+
+	const options = {
+		chipsJSON: opt?.chipsJSON || null,
+		combineResults: opt?.combineResults || false,
+	}
+
+	let jsonData = options.chipsJSON || await getJSON();
+
+	// Check if jsonData is already combined (has chip and object names at the same level) or if it is still separated by category.
+	let jsonDataIsCombined = true;
+	if (jsonData.chips) {
+		jsonDataIsCombined = false;
+	}
+
 	let results = {};
+	
 	query = query.toLowerCase().replace(/\s/gm, '');
-	$.each(jsonData, function(chipName, chipData) {
-		if (chipName.toLowerCase().match(new RegExp(`\^${query}`, 'gm'))) {
-			results[chipName] = chipData;
-		}
-	});
+
+	if (jsonDataIsCombined) {
+		$.each(jsonData, function(chipName, chipData) {
+			if (chipName.toLowerCase().replace(/\s/gm, '').match(new RegExp(`${query}`, 'gm'))) {
+				results[chipName] = chipData;
+			}
+		});
+	} else {
+		$.each(jsonData, function(key, value) {
+			$.each(value, function(chipName, chipData) {
+				if (chipName.toLowerCase().replace(/\s/gm, '').match(new RegExp(`${query}`, 'gm'))) {
+					if (options.combineResults) {
+						results[chipName] = chipData;
+						return;
+					}
+					results[key] = results[key] || {};
+					results[key][chipName] = chipData;
+				}
+			});
+		});
+	}
+
+	// Sort results alphabetically by chipName within each category (chips/objects) or overall if combined.
+	if (options.combineResults) {
+		results = Object.fromEntries(Object.entries(results).sort((a, b) => a[0].localeCompare(b[0])));
+	} else {
+		$.each(results, function(key, value) {
+			results[key] = Object.fromEntries(Object.entries(value).sort((a, b) => a[0].localeCompare(b[0])));
+		});
+	}
+
 	return results;
 }
 
@@ -69,8 +167,8 @@ export const chip = {
 		const logData = [
 			'///////////////////////////////////////////////////////',
 			'Rec Room Circuits API initialized',
-			'Data loaded with ' + data.count + ' chips',
-			'Circuits Data Last Updated: ' + data.exportedAtUtc,
+			'- Chips: ' + data.chips.count + ' / Updated: ' + data.chips.exportedAtUtc,
+			'- Objects: ' + data.objects.count + ' / Updated: ' + data.objects.updatedAtUtc,
 			'///////////////////////////////////////////////////////'
 		];
 		logData.forEach(line => console.log(line));
@@ -86,19 +184,14 @@ export const chip = {
 
 		if (typeof chip == 'string') {
 			chip = chip.replace(/\s/gm, '');
-			let jsonData = await getJSON(true);
-			if (jsonData[chip]) {
-				chip = jsonData[chip];
-			} else {
-				await search(chip).then(results => {
-					if (Object.keys(results).length > 0) {
-						chip = results[Object.keys(results)[0]];
-					} else {
-						console.error(`No chip found matching "${chip}".`);
-						return;
-					}
-				});
-			}
+			await search(chip, { combineResults: true }).then(results => {
+				if (Object.keys(results).length > 0) {
+					chip = results[Object.keys(results)[0]];
+				} else {
+					console.error(`No chip found matching "${chip}".`);
+					return;
+				}
+			});
 		}
 
 		const options = {
@@ -268,17 +361,18 @@ export const chip = {
 			nodes: []
 		};
 
-		if (chip.nodeDescs.length !== 0) {
-			let section = {
-				inputs: chip.nodeDescs[0].inputs,
-				outputs: chip.nodeDescs[0].outputs
-			};
-			_.nodes.push(section);
-		} else {
-			_.nodes.push({ inputs: [], outputs: [] });
-		}
+		_.nodes = chip.nodeDescs || [];
+		// if (chip.nodeDescs.length !== 0) {
+		// 	let section = {
+		// 		inputs: chip.nodeDescs[0].inputs,
+		// 		outputs: chip.nodeDescs[0].outputs
+		// 	};
+		// 	_.nodes.push(section);
+		// } else {
+		// 	_.nodes.push({ inputs: [], outputs: [] });
+		// }
 
-		if (options.log) console.log({RenderElement: element, ChipObject: chip, ChipNodes: _.nodes[0], Options: options});
+		if (options.log) console.log({RenderElement: element, ChipObject: chip, ChipNodes: _.nodes, Options: options});
 
 		let portSectionsHTML = '';
 		_.nodes.forEach(sec => {
@@ -328,12 +422,16 @@ export const chip = {
 		});
 
 		let chipType = '';
-		$.each(_.chipTypeDefinitions, function(key, value) {
-			if (chip.chipName.match(new RegExp(`${key}`, 'gm'))) {
-				chipType = value;
-				return false; // break loop
-			}
-		});
+		if (chip.isObjectBoard) {
+			chipType = 'board';
+		} else {
+			$.each(_.chipTypeDefinitions, function(key, value) {
+				if (chip.chipName.match(new RegExp(`${key}`, 'gm'))) {
+					chipType = value;
+					return false; // break loop
+				}
+			});
+		}
 
 		let chipHTML = _.templates.chip
 			.replace('{{chipType}}', chipType)
@@ -405,11 +503,11 @@ export const chip = {
 		chipName = chipName.replace(/\s/gm, '');
 		return jsonData[chipName];
 	},
-	async getAll() {
-		return await getJSON();
+	async getAll(opt) {
+		return await getJSON(opt);
 	},
-	async search(query, chipsJSON) {
-		return await search(query, chipsJSON);
+	async search(query, opt) {
+		return await search(query, opt);
 	}
 
 }
