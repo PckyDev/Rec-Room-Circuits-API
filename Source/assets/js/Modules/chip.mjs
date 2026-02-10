@@ -553,7 +553,10 @@ export const chip = {
 				initPortsHover($(element).find('.chip'));
 			}
 		} else {
-			return chipHTML;
+			return {
+				html: chipHTML,
+				object: chip,
+			};
 		}
 	},
 	async get(chipName) {

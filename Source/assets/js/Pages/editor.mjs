@@ -251,6 +251,36 @@ $(function () {
 				BASE_MINOR: 25,
 				rafPending: false,
 				nodes: [],
+				// Example node object structure:
+				// {
+				//     id: 'node-0',
+				//     element: jQueryElement,
+				//     selected: false,
+				//     object: {
+				// 	       chipName: 'Absolute Value',
+				//         paletteName: 'Absolute Value',
+				//         nodeDescs: [
+				//             {
+				//                 name: 'Absolute Value',
+				//                 typeParams: [ { name: 'T', type: '(float, int)'} ],
+				//				   inputs: [
+				//                     { name: 'Value', type: 'T', description: '' }
+				//				   ],
+				//				   outputs: [
+				//                     { name: 'Result', type: 'T', description: '' }
+				//				   ]
+				//             }
+				//         ]
+				//     }
+				// }
+				connections: []
+				// Example connection object structure:
+				// {
+				//     id: 'connection-0',
+				//     from: { nodeId: 'node-1', portId: 'port-1' },
+				//     to: { nodeId: 'node-2', portId: 'port-2' },
+				//     element: jQueryElement
+				// }
 			},
 			init: async () => {
 				// Load element references
@@ -356,10 +386,581 @@ $(function () {
 				},
 				getSelectedNodes: () => {
 					return _.graph.data.nodes.filter(n => n.selected);
+				},
+
+				// --- Port connections (cubic bezier wires) ------------------------------
+				_ensureWireLayer: () => {
+					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+					if (!vpEl) return null;
+
+					// Patch render once so wires keep up with pan/zoom.
+					if (!_.graph.data._wireRenderPatched) {
+						const origRender = _.graph.functions.render;
+						_.graph.functions.render = () => {
+							origRender();
+							_.graph.functions.updateConnections();
+						};
+						_.graph.data._wireRenderPatched = true;
+					}
+
+					if (_.graph.data._wireLayer?.svg) return _.graph.data._wireLayer;
+
+					// Ensure viewport is a positioning context
+					const vpStyle = window.getComputedStyle(vpEl);
+					if (vpStyle.position === 'static') vpEl.style.position = 'relative';
+
+					const svgNS = 'http://www.w3.org/2000/svg';
+					const svg = document.createElementNS(svgNS, 'svg');
+					svg.classList.add('wire-layer');
+					svg.setAttribute('width', '100%');
+					svg.setAttribute('height', '100%');
+					svg.style.position = 'absolute';
+					svg.style.left = '0';
+					svg.style.top = '0';
+					svg.style.right = '0';
+					svg.style.bottom = '0';
+					svg.style.pointerEvents = 'none';
+					svg.style.overflow = 'visible';
+					// Keep wires behind nodes (nodes live under graphCanvas).
+					svg.style.zIndex = '0';
+
+					const wiresGroup = document.createElementNS(svgNS, 'g');
+					wiresGroup.setAttribute('data-role', 'wires');
+					svg.appendChild(wiresGroup);
+
+					const tempPath = document.createElementNS(svgNS, 'path');
+					tempPath.setAttribute('data-role', 'temp');
+					tempPath.setAttribute('fill', 'none');
+					tempPath.setAttribute('stroke', '#7aa2ff');
+					tempPath.setAttribute('stroke-width', '3');
+					tempPath.setAttribute('stroke-linecap', 'round');
+					tempPath.setAttribute('opacity', '0.9');
+					tempPath.style.filter = 'drop-shadow(0 0 3px rgba(122,162,255,0.35))';
+					tempPath.style.display = 'none';
+					svg.appendChild(tempPath);
+
+					// Insert before the graph canvas so nodes paint above wires.
+					const canvasEl = _.graph.data.elements.graphCanvas.element;
+					if (canvasEl && canvasEl.parentElement === vpEl) {
+						vpEl.insertBefore(svg, canvasEl);
+					} else {
+						vpEl.appendChild(svg);
+					}
+
+					_.graph.data._wireLayer = { svg, wiresGroup, tempPath };
+					return _.graph.data._wireLayer;
+				},
+				_getPortRole: (portEl) => {
+					if (!portEl) return null;
+					// Heuristic based on existing markup: .input/.output are on the row wrapper above ports
+					const $p = $(portEl);
+					if ($p.parent().parent().hasClass('input')) return 'input';
+					if ($p.parent().parent().hasClass('output')) return 'output';
+					// Fallbacks
+					if ($p.closest('.input').length) return 'input';
+					if ($p.closest('.output').length) return 'output';
+					return null;
+				},
+				_isExecPortEl: (portEl) => {
+					if (!portEl) return false;
+
+					const attr = (portEl.getAttribute && portEl.getAttribute('porttype')) || '';
+					if (String(attr).toLowerCase() === 'exec') return true;
+
+					const cls = portEl.classList;
+					if (cls && (cls.contains('p-exec') || cls.contains('exec'))) return true;
+
+					return false;
+				},
+				_isTransparentCssColor: (cssColor) => {
+					if (!cssColor) return true;
+					const c = String(cssColor).trim().toLowerCase();
+					if (c === '' || c === 'transparent') return true;
+					// Common "fully transparent" forms.
+					if (c === 'rgba(0, 0, 0, 0)' || c === 'rgba(0,0,0,0)') return true;
+					return false;
+				},
+				_colorWithAlpha: (cssColor, alpha) => {
+					const a = Math.max(0, Math.min(1, Number(alpha)));
+					const c = String(cssColor || '').trim();
+					if (!c) return `rgba(183,199,255,${a})`;
+
+					// rgb()/rgba()
+					let m = c.match(/^rgba?\(([^)]+)\)$/i);
+					if (m) {
+						const parts = m[1].split(',').map(s => s.trim());
+						if (parts.length >= 3) {
+							const r = parts[0];
+							const g = parts[1];
+							const b = parts[2];
+							return `rgba(${r}, ${g}, ${b}, ${a})`;
+						}
+					}
+
+					// hex #rgb/#rrggbb
+					m = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+					if (m) {
+						let hex = m[1];
+						if (hex.length === 3) hex = hex.split('').map(ch => ch + ch).join('');
+						const r = parseInt(hex.slice(0, 2), 16);
+						const g = parseInt(hex.slice(2, 4), 16);
+						const b = parseInt(hex.slice(4, 6), 16);
+						return `rgba(${r}, ${g}, ${b}, ${a})`;
+					}
+
+					// Fallback: can't reliably alpha-blend named colors here.
+					return `rgba(183,199,255,${a})`;
+				},
+				_getPortColor: (portEl) => {
+					if (!portEl) return null;
+					const cs = window.getComputedStyle(portEl);
+					const candidates = [
+						cs.getPropertyValue('--port-color'),
+						cs.backgroundColor,
+						cs.borderTopColor,
+						cs.color
+					];
+					for (const raw of candidates) {
+						const c = String(raw || '').trim();
+						if (!_.graph.functions._isTransparentCssColor(c)) return c;
+					}
+					return null;
+				},
+				_getWireStrokeForPorts: (fromPortEl, toPortEl) => {
+					// Only exec->exec wires inherit port color.
+					if (!_.graph.functions._isExecPortEl(fromPortEl) || !_.graph.functions._isExecPortEl(toPortEl)) return null;
+					return _.graph.functions._getPortColor(fromPortEl) || _.graph.functions._getPortColor(toPortEl);
+				},
+				_getWireStrokeWidth: () => {
+					// Wires are drawn in viewport (screen) space, so scale width manually with zoom.
+					const base = 5;
+					const s = Number(_.graph.data.cameraState?.scale ?? 1);
+					const w = base * (Number.isFinite(s) ? s : 1);
+					return Math.max(1, Math.min(10, w));
+				},
+				_getPortType: (nodeId, portId) => {
+					if (!nodeId || !portId) return null;
+
+					const nodeData = (_.graph.data.nodes || []).find(n => n.id === nodeId);
+					const nodeObj = nodeData?.object;
+					const nodeDescs = nodeObj?.nodeDescs;
+					if (!Array.isArray(nodeDescs)) return null;
+
+					for (const desc of nodeDescs) {
+						const inputs = Array.isArray(desc?.inputs) ? desc.inputs : [];
+						for (const p of inputs) {
+							if (p?.portId === portId) return p?.type ?? null;
+						}
+
+						const outputs = Array.isArray(desc?.outputs) ? desc.outputs : [];
+						for (const p of outputs) {
+							if (p?.portId === portId) return p?.type ?? null;
+						}
+					}
+
+					return null;
+				},
+				_findPortEl: (nodeId, portId) => {
+					const nodeEl = document.getElementById(nodeId);
+					if (!nodeEl) return null;
+
+					// NOTE: ids are not globally unique in the current node builder, so avoid #id selectors.
+					const esc = (s) =>
+						(window.CSS && typeof window.CSS.escape === 'function')
+							? window.CSS.escape(s)
+							: String(s).replace(/["\\]/g, '\\$&');
+
+					return nodeEl.querySelector(`.port[id="${esc(portId)}"]`);
+				},
+				_getPortPointInViewport: (portEl) => {
+					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+					if (!vpEl || !portEl) return null;
+
+					const vpRect = vpEl.getBoundingClientRect();
+					const r = portEl.getBoundingClientRect();
+
+					return {
+						x: (r.left + r.right) * 0.5 - vpRect.left,
+						y: (r.top + r.bottom) * 0.5 - vpRect.top
+					};
+				},
+				_buildBezierPath: (p0, p1, side0 = 1, side1 = -1) => {
+					// side: +1 means "pull control point to the right", -1 to the left
+					const dx = Math.abs(p1.x - p0.x);
+					const c = Math.max(60, dx * 0.5);
+
+					const c1x = p0.x + c * side0;
+					const c1y = p0.y;
+
+					const c2x = p1.x + c * side1;
+					const c2y = p1.y;
+
+					return `M ${p0.x} ${p0.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p1.x} ${p1.y}`;
+				},
+				updateConnections: () => {
+					const layer = _.graph.functions._ensureWireLayer();
+					if (!layer) return;
+
+					const strokeWidth = _.graph.functions._getWireStrokeWidth();
+
+					// Permanent wires
+					(_.graph.data.connections || []).forEach((conn) => {
+						const fromPortEl = _.graph.functions._findPortEl(conn.from.nodeId, conn.from.portId);
+						const toPortEl = _.graph.functions._findPortEl(conn.to.nodeId, conn.to.portId);
+
+						if (!fromPortEl || !toPortEl) {
+							if (conn.element) conn.element.style.display = 'none';
+							return;
+						}
+
+						const p0 = _.graph.functions._getPortPointInViewport(fromPortEl);
+						const p1 = _.graph.functions._getPortPointInViewport(toPortEl);
+						if (!p0 || !p1) return;
+
+						const fromRole = _.graph.functions._getPortRole(fromPortEl);
+						const toRole = _.graph.functions._getPortRole(toPortEl);
+
+						// Color exec wires to match the exec port.
+						const stroke = _.graph.functions._getWireStrokeForPorts(fromPortEl, toPortEl);
+						if (stroke) {
+							conn.element.setAttribute('stroke', stroke);
+							conn.element.style.filter = `drop-shadow(0 0 4px ${_.graph.functions._colorWithAlpha(stroke, 0.35)})`;
+						} else {
+							conn.element.setAttribute('stroke', '#b7c7ff');
+							conn.element.style.filter = 'drop-shadow(0 0 4px rgba(183,199,255,0.35))';
+						}
+						conn.element.setAttribute('stroke-width', String(strokeWidth));
+
+						const side0 = fromRole === 'input' ? -1 : 1;
+						const side1 = toRole === 'input' ? -1 : 1;
+
+						conn.element.style.display = '';
+						conn.element.setAttribute('d', _.graph.functions._buildBezierPath(p0, p1, side0, side1));
+					});
+
+					// Dragging (temp) wire
+					const drag = _.graph.data._connectionDrag;
+					if (!drag?.active) return;
+
+					const fromPortEl = _.graph.functions._findPortEl(drag.from.nodeId, drag.from.portId);
+					if (!fromPortEl) return;
+
+					const p0 = _.graph.functions._getPortPointInViewport(fromPortEl);
+					const p1 = drag.mouseVp;
+					if (!p0 || !p1) return;
+
+					const fromRole = _.graph.functions._getPortRole(fromPortEl);
+					const side0 = fromRole === 'input' ? -1 : 1;
+					const side1 = -side0;
+
+					layer.tempPath.setAttribute('stroke-width', String(strokeWidth));
+					layer.tempPath.setAttribute('d', _.graph.functions._buildBezierPath(p0, p1, side0, side1));
+				},
+				removeConnectionsForPort: (nodeId, portId) => {
+					if (!nodeId || !portId) return;
+
+					const connections = _.graph.data.connections || [];
+					if (connections.length === 0) return;
+
+					const kept = [];
+					let removedAny = false;
+
+					for (const conn of connections) {
+						const matches =
+							(conn.from?.nodeId === nodeId && conn.from?.portId === portId) ||
+							(conn.to?.nodeId === nodeId && conn.to?.portId === portId);
+
+						if (matches) {
+							removedAny = true;
+							try {
+								conn.element?.remove?.();
+							} catch {
+								// ignore
+							}
+						} else {
+							kept.push(conn);
+						}
+					}
+
+					if (!removedAny) return;
+					_.graph.data.connections = kept;
+					_.graph.functions.updateConnections();
+				},
+				removeConnectionsFromPort: (nodeId, portId) => {
+					if (!nodeId || !portId) return;
+
+					const connections = _.graph.data.connections || [];
+					if (connections.length === 0) return;
+
+					const kept = [];
+					let removedAny = false;
+
+					for (const conn of connections) {
+						const matches = conn.from?.nodeId === nodeId && conn.from?.portId === portId;
+						if (matches) {
+							removedAny = true;
+							try {
+								conn.element?.remove?.();
+							} catch {
+								// ignore
+							}
+						} else {
+							kept.push(conn);
+						}
+					}
+
+					if (!removedAny) return;
+					_.graph.data.connections = kept;
+					_.graph.functions.updateConnections();
+				},
+				startConnection: (fromNodeId, fromPortId, startEvent) => {
+					const layer = _.graph.functions._ensureWireLayer();
+					if (!layer) return;
+
+					// Cancel any in-progress drag
+					_.graph.functions.cancelConnection();
+
+					const fromPortEl = _.graph.functions._findPortEl(fromNodeId, fromPortId);
+					if (!fromPortEl) return;
+
+					// Tint the temp wire if we're dragging from an exec port.
+					const tempStroke = _.graph.functions._isExecPortEl(fromPortEl)
+						? (_.graph.functions._getPortColor(fromPortEl) || '#7aa2ff')
+						: '#7aa2ff';
+					layer.tempPath.setAttribute('stroke', tempStroke);
+					layer.tempPath.style.filter = `drop-shadow(0 0 3px ${_.graph.functions._colorWithAlpha(tempStroke, 0.35)})`;
+
+					const hasExistingConnection = !!(_.graph.data.connections || []).some(
+						(c) =>
+							(c.from?.nodeId === fromNodeId && c.from?.portId === fromPortId) ||
+							(c.to?.nodeId === fromNodeId && c.to?.portId === fromPortId)
+					);
+
+					// If this port already has a connection, don't flash a temp wire on click.
+					// We'll show the temp wire only after the user actually drags.
+					layer.tempPath.style.display = hasExistingConnection ? 'none' : '';
+
+					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+					const vpRect = vpEl.getBoundingClientRect();
+
+					// Initialize the endpoint so the wire doesn't flash to the top-left.
+					const fromP0 = _.graph.functions._getPortPointInViewport(fromPortEl);
+					let initialMouseVp = fromP0 ? { x: fromP0.x, y: fromP0.y } : { x: 0, y: 0 };
+					if (startEvent && typeof startEvent.clientX === 'number' && typeof startEvent.clientY === 'number') {
+						initialMouseVp = {
+							x: startEvent.clientX - vpRect.left,
+							y: startEvent.clientY - vpRect.top
+						};
+					}
+
+					const startClient = {
+						x: (startEvent && typeof startEvent.clientX === 'number') ? startEvent.clientX : null,
+						y: (startEvent && typeof startEvent.clientY === 'number') ? startEvent.clientY : null
+					};
+
+					const drag = {
+						active: true,
+						from: { nodeId: fromNodeId, portId: fromPortId },
+						mouseVp: initialMouseVp,
+						hasExistingConnection,
+						didMove: false,
+						startClient,
+						handlers: {}
+					};
+					_.graph.data._connectionDrag = drag;
+
+					drag.handlers.onMove = (e) => {
+						if (!_.graph.data._connectionDrag?.active) return;
+
+						if (!drag.didMove && drag.startClient.x != null && drag.startClient.y != null) {
+							const dx = e.clientX - drag.startClient.x;
+							const dy = e.clientY - drag.startClient.y;
+							if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+								drag.didMove = true;
+								// Show temp wire now that it's a real drag gesture.
+								if (layer.tempPath.style.display === 'none') layer.tempPath.style.display = '';
+							}
+						}
+
+						drag.mouseVp = {
+							x: e.clientX - vpRect.left,
+							y: e.clientY - vpRect.top
+						};
+						_.graph.functions.updateConnections();
+					};
+
+					drag.handlers.onUp = (e) => {
+						if (!_.graph.data._connectionDrag?.active) return;
+
+						// If this was a simple click on a connected port (no drag), remove its connection(s).
+						if (drag.hasExistingConnection && !drag.didMove) {
+							const el = document.elementFromPoint(e.clientX, e.clientY);
+							const portEl = el?.closest?.('.port');
+							const nodeEl = portEl?.closest?.('.chip');
+							const nodeId = nodeEl?.id;
+							const portId = portEl?.getAttribute?.('id');
+
+							if (nodeId === drag.from.nodeId && portId === drag.from.portId) {
+								_.graph.functions.cancelConnection();
+								_.graph.functions.removeConnectionsForPort(nodeId, portId);
+								return;
+							}
+						}
+
+						const el = document.elementFromPoint(e.clientX, e.clientY);
+						const portEl = el?.closest?.('.port');
+
+						if (!portEl) {
+							_.graph.functions.cancelConnection();
+							return;
+						}
+
+						const nodeEl = portEl.closest('.chip');
+						const toNodeId = nodeEl?.id;
+						const toPortId = portEl.getAttribute('id');
+
+						if (!toNodeId || !toPortId) {
+							_.graph.functions.cancelConnection();
+							return;
+						}
+
+						_.graph.functions.finishConnection(toNodeId, toPortId);
+					};
+
+					drag.handlers.onKey = (e) => {
+						if (e.key === 'Escape') _.graph.functions.cancelConnection();
+					};
+
+					window.addEventListener('mousemove', drag.handlers.onMove, true);
+					window.addEventListener('mouseup', drag.handlers.onUp, true);
+					window.addEventListener('keydown', drag.handlers.onKey, true);
+
+					// Initialize line immediately (only visible if tempPath is shown).
+					_.graph.functions.updateConnections();
+				},
+				finishConnection: (toNodeId, toPortId) => {
+					const drag = _.graph.data._connectionDrag;
+					if (!drag?.active) return;
+
+					const layer = _.graph.functions._ensureWireLayer();
+					if (!layer) return;
+
+					const fromPortEl = _.graph.functions._findPortEl(drag.from.nodeId, drag.from.portId);
+					const toPortEl = _.graph.functions._findPortEl(toNodeId, toPortId);
+					if (!fromPortEl || !toPortEl) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					// Don’t connect a port to itself
+					if (drag.from.nodeId === toNodeId && drag.from.portId === toPortId) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					const fromRole0 = _.graph.functions._getPortRole(fromPortEl);
+					const toRole0 = _.graph.functions._getPortRole(toPortEl);
+
+					let from = { nodeId: drag.from.nodeId, portId: drag.from.portId, role: fromRole0 };
+					let to = { nodeId: toNodeId, portId: toPortId, role: toRole0 };
+
+					// Normalize direction: output -> input
+					if (from.role !== 'output' && to.role === 'output') {
+						[from, to] = [to, from];
+					}
+
+					// Enforce output -> input if roles are known
+					if (from.role && to.role && !(from.role === 'output' && to.role === 'input')) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					// Enforce: exec ports can only connect to exec ports.
+					const fromIsExec = _.graph.functions._isExecPortEl(fromPortEl);
+					const toIsExec = _.graph.functions._isExecPortEl(toPortEl);
+					if (fromIsExec !== toIsExec) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					// Enforce: exec output ports can have only 1 connection. New connection overwrites old.
+					// Exec input ports can have multiple connections.
+					if (from.role === 'output' && _.graph.functions._isExecPortEl(fromPortEl)) {
+						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId);
+					}
+
+					const svgNS = 'http://www.w3.org/2000/svg';
+					const path = document.createElementNS(svgNS, 'path');
+					path.setAttribute('fill', 'none');
+					const stroke = _.graph.functions._getWireStrokeForPorts(fromPortEl, toPortEl) || '#b7c7ff';
+					path.setAttribute('stroke', stroke);
+					path.setAttribute('stroke-width', String(_.graph.functions._getWireStrokeWidth()));
+					path.setAttribute('stroke-linecap', 'round');
+					path.setAttribute('opacity', '0.95');
+					path.style.filter = `drop-shadow(0 0 4px ${_.graph.functions._colorWithAlpha(stroke, 0.35)})`;
+
+					layer.wiresGroup.appendChild(path);
+
+					const connection = {
+						id: 'connection-' + (_.graph.data.connections?.length || 0),
+						from: { nodeId: from.nodeId, portId: from.portId },
+						to: { nodeId: to.nodeId, portId: to.portId },
+						element: path
+					};
+
+					if (!_.graph.data.connections) _.graph.data.connections = [];
+					_.graph.data.connections.push(connection);
+
+					_.graph.functions.cancelConnection(); // clears temp + handlers
+					_.graph.functions.updateConnections();
+				},
+				cancelConnection: () => {
+					const layer = _.graph.data._wireLayer;
+					const drag = _.graph.data._connectionDrag;
+
+					if (layer?.tempPath) {
+						layer.tempPath.style.display = 'none';
+						layer.tempPath.removeAttribute('d');
+					}
+
+					if (drag?.handlers) {
+						window.removeEventListener('mousemove', drag.handlers.onMove, true);
+						window.removeEventListener('mouseup', drag.handlers.onUp, true);
+						window.removeEventListener('keydown', drag.handlers.onKey, true);
+					}
+
+					_.graph.data._connectionDrag = null;
+				},
+				_bindPortConnectionDelegation: () => {
+					if (_.graph.data._portConnectionBound) return;
+
+					const canvasEl = _.graph.data.elements.graphCanvas.element;
+					if (!canvasEl) return;
+
+					_.graph.data._portConnectionBound = true;
+
+					// Start a wire drag from any port (existing or future).
+					$(canvasEl).on('mousedown.portConnect', '.port', function (e) {
+						if (e.which !== 1) return; // left button only
+						e.preventDefault();
+						e.stopPropagation();
+
+						const portEl = this;
+						const nodeEl = portEl.closest('.chip');
+						if (!nodeEl?.id) return;
+
+						const portId = portEl.getAttribute('id');
+						if (!portId) return;
+
+						_.graph.functions.startConnection(nodeEl.id, portId, e);
+					});
 				}
 			},
 			load: {
 				elements: async () => {
+					// Bind delegated port handlers once elements exist (after this function finishes).
+					queueMicrotask(() => _.graph.functions._bindPortConnectionDelegation());
+
 					$.each(_.graph.data.elements, function (elementName, elementData) {
 						const element = document.getElementById(elementData.id);
 						if (element) {
@@ -567,16 +1168,55 @@ $(function () {
 			},
 			node: {
 				add: async (node) => {
-					let nodeHTML = await chip.render(null, node, { log: false, autoFit: false });
-					if (nodeHTML) {
+					let nodeData = await chip.render(null, node, { log: false, autoFit: false });
+					console.log(nodeData.object);
+					if (nodeData.html) {
 
-						nodeHTML = nodeHTML.replace('class="chip', 'id="node-' + _.graph.data.nodes.length + '" class="chip');
-						$(_.graph.data.elements.graphCanvas.element).append(nodeHTML);
+						nodeData.html = nodeData.html.replace('class="chip', 'id="node-' + _.graph.data.nodes.length + '" class="chip');
+
+						// Give every port a unique id for connections to reference
+						const tempContainer = $('<div>' + nodeData.html + '</div>');
+						const chipDescs = tempContainer.find('.section');
+						tempContainer.find('.port').each(function (index) {
+							const portEl = this;
+							const $port = $(portEl);
+							const portId = 'port-' + index;
+							$port.attr('id', portId);
+
+							// Map this DOM port to its corresponding nodeDesc entry, if possible.
+							const sectionEl = $port.closest('.section')[0];
+							if (!sectionEl) return;
+
+							const chipDescIndex = chipDescs.index(sectionEl);
+							if (chipDescIndex < 0) return;
+
+							const inInput = $port.closest('.input').length > 0;
+							const inOutput = $port.closest('.output').length > 0;
+							const portType = inInput ? 'inputs' : (inOutput ? 'outputs' : null);
+							if (!portType) return;
+
+							const nodeDesc = nodeData.object?.nodeDescs?.[chipDescIndex];
+							if (!nodeDesc) return;
+
+							const portsInSection = $(sectionEl).find(inInput ? '.input .port' : '.output .port');
+							const portIndex = portsInSection.index(portEl);
+							if (portIndex < 0) return;
+
+							const chipDesc = nodeDesc?.[portType]?.[portIndex];
+							if (!chipDesc) return;
+
+							chipDesc.portId = portId;
+						});
+						nodeData.html = tempContainer.html();
+
+						$(_.graph.data.elements.graphCanvas.element).append(nodeData.html);
 						const nodeElement = $(_.graph.data.elements.graphCanvas.element).find('#node-' + _.graph.data.nodes.length);
+
 						const nodeObject = {
 							id: 'node-' + _.graph.data.nodes.length,
 							element: nodeElement,
 							selected: false,
+							object: nodeData.object
 						}
 						_.graph.data.nodes.push(nodeObject);
 
@@ -620,6 +1260,11 @@ $(function () {
 						// so set them directly to avoid drift/jumps across zoom levels.
 						nodeElement.css('left', x + 'px');
 						nodeElement.css('top', y + 'px');
+
+						// Keep wires in sync with node motion.
+						if (_.graph.functions.updateConnections) {
+							_.graph.functions.updateConnections();
+						}
 					} else {
 						console.warn('Node element not found for:', node);
 					}
@@ -649,6 +1294,11 @@ $(function () {
 
 					nodeElement.on('mousedown', function (e) {
 						if (e.which !== 1) return; // Only left mouse button
+
+						// If the gesture started on a port, let the port connection system handle it.
+						const dragTarget = e.target;
+						if (dragTarget?.closest?.('.port')) return;
+
 						e.preventDefault();
 
 						isDragging = true;
@@ -748,6 +1398,10 @@ $(function () {
 						(e) => {
 							if (e.button !== 0) return; // left button only
 
+							// If the gesture started on a port, let the port connection system handle it.
+							const selectTarget = e.target;
+							if (selectTarget?.closest?.('.port')) return;
+
 							const isMultiSelect = e.ctrlKey || e.metaKey;
 							const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
 
@@ -771,6 +1425,11 @@ $(function () {
 
 					nodeElement.on('mousedown', function (e) {
 						if (e.which !== 1) return; // left mouse button only
+
+						// If the gesture started on a port, don't stop propagation; let the delegated port handler run.
+						const selectTarget = e.target;
+						if (selectTarget?.closest?.('.port')) return;
+
 						e.stopPropagation();
 
 						const isMultiSelect = e.ctrlKey || e.metaKey;
@@ -814,6 +1473,36 @@ $(function () {
 							}
 
 							preselectedOnDown = false;
+						});
+					});
+				},
+				setPortConnectionHandler: async (node) => {
+					let nodeElement = await _.graph.functions.validateNode(node);
+					if (!nodeElement) return;
+
+					const nodeId = nodeElement.attr('id');
+					let nodeData = _.graph.data.nodes.find(n => n.id === nodeId);
+					if (!nodeData) {
+						console.warn('Node data not found for element:', nodeElement);
+						return;
+					}
+
+					// Implement connection creation by dragging from ports, and call this handler to set up the port elements for that interaction.
+					
+					const ports = nodeElement.find('.port');
+
+					ports.each(function () {
+						const portElement = $(this);
+						const portId = portElement.attr('id');
+					 	const portType = portElement.parent().parent().hasClass('input') ? 'input' : 'output';
+
+						portElement.on('mousedown', function (e) {
+							e.preventDefault();
+							e.stopPropagation();
+
+							// Start a connection drag from this port. Show a temporary connection line following the mouse.
+							// If the mouse is released over a compatible port, create a connection. Otherwise cancel.
+							_.graph.functions.startConnection(nodeId, portId, e);
 						});
 					});
 				}
