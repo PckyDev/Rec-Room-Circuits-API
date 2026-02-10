@@ -11,7 +11,7 @@
 }
 
 .port.list p {
-  background: url("../../../assets/img/Circuit%20Icons/List.png") center / cover no-repeat;
+  background: url("https://raw.githubusercontent.com/PckyDev/Rec-Room-Circuits-API/refs/heads/main/Source/assets/img/Circuit%20Icons/List.png") center / cover no-repeat;
 }
 
 .input .port.list {
