@@ -230,6 +230,11 @@ $(function () {
 					graphCanvas: {
 						id: 'graphCanvas',
 						element: null,
+					},
+					dragSelectionBox: {
+						id: 'dragSelectionBox',
+						element: null,
+						isDragging: false,
 					}
 				},
 				cameraState: {
@@ -307,6 +312,51 @@ $(function () {
 					vpEl.style.setProperty('--grid-x', `${mod(_.graph.data.cameraState.tx, majorPx)}px`);
 					vpEl.style.setProperty('--grid-y', `${mod(_.graph.data.cameraState.ty, majorPx)}px`);
 				},
+				validateNode: (node) => {
+					let nodeElement = null;
+					if (typeof node === 'string' && node.startsWith('node-')) {
+						nodeElement = _.graph.data.nodes.find(n => n.id === node)?.element;
+					} else if (node instanceof Element) {
+						nodeElement = $(node);
+					} else if (node instanceof jQuery && node.length > 0) {
+						nodeElement = node;
+					} else {
+						console.warn('Invalid node identifier:', node);
+						return;
+					}
+					return nodeElement;
+				},
+				selectNode: (node) => {
+					const nodeElement = _.graph.functions.validateNode(node);
+					if (nodeElement) {
+						// Toggle selected class on the node
+						nodeElement.addClass('selected');
+						// Set selected state in data
+						const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
+						if (nodeData) {
+							nodeData.selected = true;
+						}
+					} else {
+						console.warn('Node element not found for:', node);
+					}
+				},
+				deselectNode: (node) => {
+					const nodeElement = _.graph.functions.validateNode(node);
+					if (nodeElement) {
+						// Toggle selected class on the node
+						nodeElement.removeClass('selected');
+						// Set selected state in data
+						const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
+						if (nodeData) {
+							nodeData.selected = false;
+						}
+					} else {
+						console.warn('Node element not found for:', node);
+					}
+				},
+				getSelectedNodes: () => {
+					return _.graph.data.nodes.filter(n => n.selected);
+				}
 			},
 			load: {
 				elements: async () => {
@@ -398,6 +448,120 @@ $(function () {
 						vpEl.addEventListener('contextmenu', (e) => {
 							e.preventDefault();
 						});
+					},
+					canvasClickDeselectNodes: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						vpEl.addEventListener('click', (e) => {
+							const selectedNodes = _.graph.functions.getSelectedNodes();
+							if (selectedNodes.length === 0) return;
+							// Deselect all nodes if click on empty canvas (not on a node)
+							if (e.target === vpEl) {
+								selectedNodes.forEach(n => _.graph.functions.deselectNode(n.element));
+							}
+						});
+					},
+					dragSelectionBox: async () => {
+						const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+						if (!vpEl) return;
+
+						const boxEl = _.graph.data.elements.dragSelectionBox.element;
+						if (!boxEl) return;
+
+						let startX = 0;
+						let startY = 0;
+						let didDrag = false;
+						let suppressNextClick = false;
+
+						const DRAG_THRESHOLD = 3;
+
+						// Prevent the "click on empty canvas" handler from deselecting after a drag-select.
+						// Use capture so we run before other click listeners.
+						vpEl.addEventListener(
+							'click',
+							(e) => {
+								if (!suppressNextClick) return;
+								suppressNextClick = false;
+								e.preventDefault();
+								e.stopImmediatePropagation();
+							},
+							true
+						);
+
+						vpEl.addEventListener('mousedown', (e) => {
+							if (e.button !== 0) return; // left button only
+							if (e.target !== vpEl) return; // only start if clicking on empty canvas
+
+							e.preventDefault();
+
+							_.graph.data.elements.dragSelectionBox.isDragging = true;
+							didDrag = false;
+
+							startX = e.clientX;
+							startY = e.clientY;
+
+							boxEl.style.left = startX + 'px';
+							boxEl.style.top = startY + 'px';
+							boxEl.style.width = '0px';
+							boxEl.style.height = '0px';
+							boxEl.classList.add('dragging');
+						});
+
+						window.addEventListener('mousemove', (e) => {
+							if (!_.graph.data.elements.dragSelectionBox.isDragging) return;
+
+							const currentX = e.clientX;
+							const currentY = e.clientY;
+
+							if (!didDrag) {
+								if (
+									Math.abs(currentX - startX) > DRAG_THRESHOLD ||
+									Math.abs(currentY - startY) > DRAG_THRESHOLD
+								) {
+									didDrag = true;
+								}
+							}
+
+							const x = Math.min(currentX, startX);
+							const y = Math.min(currentY, startY);
+							const width = Math.abs(currentX - startX);
+							const height = Math.abs(currentY - startY);
+
+							boxEl.style.left = x + 'px';
+							boxEl.style.top = y + 'px';
+							boxEl.style.width = width + 'px';
+							boxEl.style.height = height + 'px';
+
+							// Select nodes that intersect with the selection box
+							const boxRect = boxEl.getBoundingClientRect();
+							_.graph.data.nodes.forEach((n) => {
+								const nodeRect = n.element[0].getBoundingClientRect();
+								const intersects = !(
+									nodeRect.right < boxRect.left ||
+									nodeRect.left > boxRect.right ||
+									nodeRect.bottom < boxRect.top ||
+									nodeRect.top > boxRect.bottom
+								);
+
+								if (intersects) _.graph.functions.selectNode(n.element);
+								else _.graph.functions.deselectNode(n.element);
+							});
+						});
+
+						window.addEventListener('mouseup', (e) => {
+							if (e.button !== 0) return; // left button only
+							if (!_.graph.data.elements.dragSelectionBox.isDragging) return;
+
+							_.graph.data.elements.dragSelectionBox.isDragging = false;
+
+							// If we actually dragged, suppress the following click event so selection persists.
+							if (didDrag) suppressNextClick = true;
+
+							boxEl.classList.remove('dragging');
+							boxEl.style.width = '0px';
+							boxEl.style.height = '0px';
+						});
 					}
 				}
 			},
@@ -412,6 +576,7 @@ $(function () {
 						const nodeObject = {
 							id: 'node-' + _.graph.data.nodes.length,
 							element: nodeElement,
+							selected: false,
 						}
 						_.graph.data.nodes.push(nodeObject);
 
@@ -429,6 +594,9 @@ $(function () {
 
 						// Set up port hover handlers
 						_.graph.node.setPortsHoverHandler(nodeElement);
+
+						// Set up node selection handler
+						_.graph.node.setSelectHandler(nodeElement);
 
 					} else {
 						console.warn('Failed to render chip for node:', node);
@@ -457,58 +625,97 @@ $(function () {
 					}
 				},
 				setDragHandler: async (node) => {
-					let nodeElement = null;
-					if (typeof node === 'string' && node.startsWith('node-')) {
-						nodeElement = _.graph.data.nodes.find(n => n.id === node)?.element;
-					} else if (node instanceof Element) {
-						nodeElement = $(node);
-					} else if (node instanceof jQuery && node.length > 0) {
-						nodeElement = node;
-					} else {
-						console.warn('Invalid node identifier:', node);
-						return;
-					}
+					let nodeElement = await _.graph.functions.validateNode(node);
+					if (!nodeElement) return;
 
-					if (nodeElement) {
-						let isDragging = false;
-						let lastX = 0;
-						let lastY = 0;
+					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+					if (!vpEl) return;
 
-						nodeElement.on('mousedown', function (e) {
-							if (e.which !== 1) return; // Only left mouse button
-							e.preventDefault();
-							isDragging = true;
-							lastX = e.clientX;
-							lastY = e.clientY;
-							nodeElement.addClass('grabbing');
+					let isDragging = false;
 
-							// Bring the dragged node to the front by moving it to the end of the container
-							nodeElement.appendTo(nodeElement.parent());
+					// Nodes we are dragging in this gesture (supports multi-select)
+					let dragNodes = [];
+
+					// For each node: offset from mouse(world) to node position(world) at grab time
+					// DOMElement -> { dx, dy }
+					let grabOffsets = new Map();
+
+					const getMouseWorld = (clientX, clientY) => {
+						const rect = vpEl.getBoundingClientRect();
+						const sx = clientX - rect.left;
+						const sy = clientY - rect.top;
+						return _.graph.functions.screenToWorld(sx, sy);
+					};
+
+					nodeElement.on('mousedown', function (e) {
+						if (e.which !== 1) return; // Only left mouse button
+						e.preventDefault();
+
+						isDragging = true;
+
+						// If the grabbed node is selected, drag all selected nodes. Otherwise drag only this node.
+						const grabbedIsSelected = nodeElement.hasClass('selected');
+
+						if (grabbedIsSelected) {
+							dragNodes = _.graph.functions
+								.getSelectedNodes()
+								.map(n => n.element)
+								.filter(el => el && el.length > 0);
+
+							// Ensure the grabbed node is included (defensive)
+							if (!dragNodes.some(el => el.is(nodeElement))) dragNodes.push(nodeElement);
+						} else {
+							dragNodes = [nodeElement];
+						}
+
+						// Cache grab offsets in WORLD space so zooming mid-drag doesn't cause cursor drift.
+						const mouseWorld0 = getMouseWorld(e.clientX, e.clientY);
+
+						grabOffsets = new Map();
+						dragNodes.forEach(el => {
+							const left = parseFloat(el.css('left')) || 0;
+							const top = parseFloat(el.css('top')) || 0;
+
+							grabOffsets.set(el[0], {
+								dx: mouseWorld0.x - left,
+								dy: mouseWorld0.y - top
+							});
+
+							el.addClass('grabbing');
 						});
 
-						$(window).on('mousemove', function (e) {
+						// Bring dragged nodes to the front
+						const parent = nodeElement.parent();
+						dragNodes.forEach(el => el.appendTo(parent));
+
+						// Avoid stacking multiple window handlers
+						$(window).off('mousemove.nodeDrag mouseup.nodeDrag');
+
+						$(window).on('mousemove.nodeDrag', function (ev) {
 							if (!isDragging) return;
-							const dx = e.clientX - lastX;
-							const dy = e.clientY - lastY;
-							lastX = e.clientX;
-							lastY = e.clientY;
 
-							// Convert screen-space mouse movement to world-space movement.
-							const scale = _.graph.data.cameraState.scale || 1;
-							const worldDx = dx / scale;
-							const worldDy = dy / scale;
+							const mouseWorld = getMouseWorld(ev.clientX, ev.clientY);
 
-							const currentLeft = parseFloat(nodeElement.css('left')) || 0;
-							const currentTop = parseFloat(nodeElement.css('top')) || 0;
-							_.graph.node.setPosition(nodeElement, currentLeft + worldDx, currentTop + worldDy);
+							dragNodes.forEach(el => {
+								const off = grabOffsets.get(el[0]);
+								if (!off) return;
+
+								_.graph.node.setPosition(el, mouseWorld.x - off.dx, mouseWorld.y - off.dy);
+							});
 						});
 
-						$(window).on('mouseup', function (e) {
+						$(window).on('mouseup.nodeDrag', function () {
 							if (!isDragging) return;
+
 							isDragging = false;
-							nodeElement.removeClass('grabbing');
+							dragNodes.forEach(el => el.removeClass('grabbing'));
+
+							dragNodes = [];
+							grabOffsets.clear();
+
+							$(window).off('mousemove.nodeDrag mouseup.nodeDrag');
 						});
-					}
+					});
 				},
 				setPortsHoverHandler: async (node) => {
 					let nodeElement = null;
@@ -526,6 +733,89 @@ $(function () {
 					if (nodeElement) {
 						chip.initPortsHover(nodeElement);
 					}
+				},
+				setSelectHandler: async (node) => {
+					let nodeElement = await _.graph.functions.validateNode(node);
+					if (!nodeElement) return;
+
+					// Run before jQuery bubble handlers (and before the drag handler),
+					// so dragging an unselected chip will select it first.
+					let preselectedOnDown = false;
+					const domEl = nodeElement[0];
+
+					domEl.addEventListener(
+						'mousedown',
+						(e) => {
+							if (e.button !== 0) return; // left button only
+
+							const isMultiSelect = e.ctrlKey || e.metaKey;
+							const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
+
+							// If not selected, select immediately so dragging starts with it selected.
+							if (!nodeData?.selected) {
+								preselectedOnDown = true;
+
+								if (!isMultiSelect) {
+									_.graph.data.nodes.forEach(n => {
+										if (n.element && !n.element.is(nodeElement)) _.graph.functions.deselectNode(n.element);
+									});
+								}
+
+								_.graph.functions.selectNode(nodeElement);
+							} else {
+								preselectedOnDown = false;
+							}
+						},
+						true // capture
+					);
+
+					nodeElement.on('mousedown', function (e) {
+						if (e.which !== 1) return; // left mouse button only
+						e.stopPropagation();
+
+						const isMultiSelect = e.ctrlKey || e.metaKey;
+
+						const startX = e.clientX;
+						const startY = e.clientY;
+						let moved = false;
+
+						$(window).off('mousemove.nodeSelect mouseup.nodeSelect');
+
+						$(window).on('mousemove.nodeSelect', function (ev) {
+							if (Math.abs(ev.clientX - startX) > 3 || Math.abs(ev.clientY - startY) > 3) {
+								moved = true;
+							}
+						});
+
+						$(window).on('mouseup.nodeSelect', function () {
+							$(window).off('mousemove.nodeSelect mouseup.nodeSelect');
+
+							// If it turned into a drag, selection was already handled on mousedown.
+							if (moved) {
+								preselectedOnDown = false;
+								return;
+							}
+
+							const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
+
+							if (!isMultiSelect) {
+								// single select
+								_.graph.data.nodes.forEach(n => {
+									if (n.element && !n.element.is(nodeElement)) _.graph.functions.deselectNode(n.element);
+								});
+								_.graph.functions.selectNode(nodeElement);
+							} else {
+								// multi-select: ctrl/cmd-click toggles, but don't immediately toggle off
+								// if we only just preselected on mousedown.
+								if (!preselectedOnDown) {
+									if (nodeData?.selected) _.graph.functions.deselectNode(nodeElement);
+									else _.graph.functions.selectNode(nodeElement);
+								}
+							}
+
+							preselectedOnDown = false;
+						});
+					});
 				}
 			}
 		},

@@ -41,3 +41,24 @@
   cursor: grabbing;
 }
 
+/* CHIP SELECT */
+
+.editor .graph-viewport .graph-canvas .chip.selected {
+  outline: .125rem solid rgb(116,237,54,0.75);
+  outline-offset: .125rem;
+}
+
+.editor .drag-select {
+  position: absolute;
+  user-select: none;
+  pointer-events: none;
+  touch-action: none;
+  border-radius: var(--rr-border-radius);
+  outline: .125rem dashed rgb(116,237,54,0.75);
+  display: none;
+}
+
+.editor .drag-select.dragging {
+  display: block;
+}
+
