@@ -17,10 +17,6 @@ $(function () {
 			});
 			await _.palette.init();
 			await _.graph.init();
-			// console.log('Testing chip search for "Trigger"...');
-			// await chip.search('Trigger', { chipsJSON: _.data.chipsJSON, combineResults: true }).then(data => {
-			// 	console.log('Search results for "Trigger":', data);
-			// });
 		},
 		palette: {
 			data: {
@@ -431,6 +427,9 @@ $(function () {
 						// Make the node draggable
 						_.graph.node.setDragHandler(nodeElement);
 
+						// Set up port hover handlers
+						_.graph.node.setPortsHoverHandler(nodeElement);
+
 					} else {
 						console.warn('Failed to render chip for node:', node);
 					}
@@ -481,7 +480,7 @@ $(function () {
 							isDragging = true;
 							lastX = e.clientX;
 							lastY = e.clientY;
-							nodeElement.addClass('dragging');
+							nodeElement.addClass('grabbing');
 
 							// Bring the dragged node to the front by moving it to the end of the container
 							nodeElement.appendTo(nodeElement.parent());
@@ -507,8 +506,25 @@ $(function () {
 						$(window).on('mouseup', function (e) {
 							if (!isDragging) return;
 							isDragging = false;
-							nodeElement.removeClass('dragging');
+							nodeElement.removeClass('grabbing');
 						});
+					}
+				},
+				setPortsHoverHandler: async (node) => {
+					let nodeElement = null;
+					if (typeof node === 'string' && node.startsWith('node-')) {
+						nodeElement = _.graph.data.nodes.find(n => n.id === node)?.element;
+					} else if (node instanceof Element) {
+						nodeElement = $(node);
+					} else if (node instanceof jQuery && node.length > 0) {
+						nodeElement = node;
+					} else {
+						console.warn('Invalid node identifier:', node);
+						return;
+					}
+
+					if (nodeElement) {
+						chip.initPortsHover(nodeElement);
 					}
 				}
 			}

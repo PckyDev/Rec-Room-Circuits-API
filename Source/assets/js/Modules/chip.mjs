@@ -10,7 +10,8 @@ const _ = {
 				'chip-versions.css',
 				'port-colors.css',
 				'port-sizes.css',
-				'port-versions.css'
+				'port-versions.css',
+				'port-hover.css'
 			]
 		}
 	}
@@ -148,6 +149,40 @@ async function search(query, opt) {
 	return results;
 }
 
+async function initPortsHover(chipElement) {
+	const portHoverTemplate = `
+		<div class="port-hover">
+			<p class="title">{{type}}</p>
+			<p class="value">{{value}}</p>
+		</div>`;
+	
+	$(chipElement).find('.port').each(function() {
+		const portElement = $(this);
+		const portType = portElement.attr('portType') || '';
+		const portValue = portElement.attr('portValue') || '';
+
+		const hoverElement = $(portHoverTemplate
+			.replace('{{type}}', portType)
+			.replace('{{value}}', portValue)
+		);
+
+		portElement.parent().append(hoverElement);
+
+		// Position the hover element above the port and centered horizontally
+		function positionHover() {
+			// const portSide = portElement.parent().parent().hasClass('input') ? 'left' : 'right');
+		}
+
+		positionHover();
+
+		portElement.on('mouseenter', function() {
+			hoverElement.addClass('show');
+		}).on('mouseleave', function() {
+			hoverElement.removeClass('show');
+		});
+	});
+}
+
 export const chip = {
 	
 	init: async () => {
@@ -197,7 +232,8 @@ export const chip = {
 		const options = {
 			log: opt?.log || false,
 			size: opt?.size || 1,
-			autoFit: opt?.autoFit || true
+			autoFit: opt?.autoFit || true,
+			enablePortHover: opt?.enablePortHover || false
 		}
 
 		const _ = {
@@ -231,7 +267,7 @@ export const chip = {
 				port: `
 					<div class="port-container">
 						<p class="name">{{portName}}</p>
-						<div class="port p-{{portType}}">
+						<div portType="{{actualPortType}}" portValue="{{actualPortValue}}" class="port p-{{portType}}">
 							<p>{{portValue}}</p>
 						</div>
 					</div>`
@@ -362,15 +398,6 @@ export const chip = {
 		};
 
 		_.nodes = chip.nodeDescs || [];
-		// if (chip.nodeDescs.length !== 0) {
-		// 	let section = {
-		// 		inputs: chip.nodeDescs[0].inputs,
-		// 		outputs: chip.nodeDescs[0].outputs
-		// 	};
-		// 	_.nodes.push(section);
-		// } else {
-		// 	_.nodes.push({ inputs: [], outputs: [] });
-		// }
 
 		if (options.log) console.log({RenderElement: element, ChipObject: chip, ChipNodes: _.nodes, Options: options});
 
@@ -393,8 +420,6 @@ export const chip = {
 							ports = replacePorts;
 						}
 					}
-					// let extraPorts = _.portDefinitions[chip.chipName][loop === 'input' ? 'extraInputs' : 'extraOutputs'] || [];
-					// ports = ports.concat(extraPorts);
 				}
 				ports.forEach(port => {
 					let portType = 'object';
@@ -404,10 +429,27 @@ export const chip = {
 							return false; // break loop
 						}
 					});
+
+					const typeParams = sec.typeParams || [];
+					let actualPortType = port.type;
+					if (actualPortType.toLowerCase() == 't') {
+						if (typeParams.length > 0) {
+							$.each(typeParams, function(i, param) {
+								if (param.name.toLowerCase() == 't') {
+									actualPortType = param.type;
+									return false; // break loop
+								}
+							});
+						}
+					}
+						
+
 					let portHTML = _.templates.port
 						.replace('{{portName}}', port.name !== '' ? port.name : '|')
 						.replace('{{portType}}', port.type.toLowerCase().includes('list') ? portType + ' list' : portType)
-						.replace('{{portValue}}', _.defaultPortValues[port.type.toLowerCase()] || '');
+						.replace('{{portValue}}', _.defaultPortValues[port.type.toLowerCase()] || '')
+						.replace('{{actualPortType}}', actualPortType)
+						.replace('{{actualPortValue}}', _.defaultPortValues[port.type.toLowerCase()] || '');
 					if (loop === 'input') {
 						inputPortsHTML += portHTML;
 					} else {
@@ -506,6 +548,10 @@ export const chip = {
 
 				autoFit();
 			}
+
+			if (options.enablePortHover) {
+				initPortsHover($(element).find('.chip'));
+			}
 		} else {
 			return chipHTML;
 		}
@@ -520,6 +566,10 @@ export const chip = {
 	},
 	async search(query, opt) {
 		return await search(query, opt);
+	},
+	async initPortsHover(nodeElement) {
+		if (!nodeElement) return;
+		initPortsHover(nodeElement);
 	}
 
 }

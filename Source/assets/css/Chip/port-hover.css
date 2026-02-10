@@ -1,0 +1,57 @@
+.port-hover {
+  --port-hover-size: 2rem;
+  position: absolute;
+  /*left: 50%;*/
+  /*top: 50%;*/
+  width: var(--port-hover-size);
+  height: var(--port-hover-size);
+  border-radius: calc(var(--rr-border-radius) * 2);
+  border: .3rem solid #ccb224;
+  user-select: none;
+  pointer-events: none;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  transform-origin: center;
+  transition: .2s;
+  opacity: 0;
+  transform: scale(0);
+  z-index: 99999999;
+}
+
+.port-hover.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.input .port-hover {
+  left: calc((var(--port-hover-size) / 2) * -1);
+}
+
+.output .port-hover {
+  right: calc((var(--port-hover-size) / 2) * -1);
+}
+
+.port-hover .title, .port-hover .value {
+  transform: translateY(-3rem);
+  font-family: 'Roboto';
+  margin: 0;
+  white-space: nowrap;
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+  letter-spacing: .1rem;
+}
+
+.port-hover .title {
+  font-size: 1.25rem;
+  color: white;
+  font-weight: 600;
+}
+
+.port-hover .value {
+  font-size: 1rem;
+  color: #f7f04d;
+  font-weight: 500;
+}
+
