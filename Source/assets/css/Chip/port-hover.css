@@ -75,6 +75,6 @@
 }
 
 .cannot-connect .port-hover, .connected .port-hover {
-  outline: none;
+  border: none;
 }
 

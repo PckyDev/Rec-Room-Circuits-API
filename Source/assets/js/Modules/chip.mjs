@@ -154,6 +154,12 @@ async function initPortsHover(chipElement) {
 		<div class="port-hover">
 			<p class="title">{{type}}</p>
 			<p class="value">{{value}}</p>
+			<svg class="disconnect" xmlns="http://www.w3.org/2000/svg" viewBox="-64 0 512 512" width="1em" height="1em" fill="currentColor">
+				<path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"></path>
+			</svg>
+			<svg class="not-allowed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1em" height="1em" fill="currentColor">
+				<path d="M367.2 412.5L99.5 144.8C77.1 176.1 64 214.5 64 256c0 106 86 192 192 192c41.5 0 79.9-13.1 111.2-35.5zm45.3-45.3C434.9 335.9 448 297.5 448 256c0-106-86-192-192-192c-41.5 0-79.9 13.1-111.2 35.5L412.5 367.2zM0 256a256 256 0 1 1 512 0A256 256 0 1 1 0 256z"></path>
+			</svg>
 		</div>`;
 	
 	$(chipElement).find('.port').each(function() {
@@ -397,7 +403,11 @@ export const chip = {
 			nodes: []
 		};
 
-		_.nodes = chip.nodeDescs || [];
+		_.nodes = (chip.nodeDescs
+			? (globalThis.structuredClone
+				? structuredClone(chip.nodeDescs)
+				: JSON.parse(JSON.stringify(chip.nodeDescs)))
+			: []);
 
 		if (options.log) console.log({RenderElement: element, ChipObject: chip, ChipNodes: _.nodes, Options: options});
 
@@ -408,19 +418,34 @@ export const chip = {
 			let outputPortsHTML = '';
 			let portLoop = ['input', 'output'];
 			portLoop.forEach(loop => {
-				let ports = loop === 'input' ? sec.inputs : sec.outputs;
+				let ports = (loop === 'input' ? (sec.inputs || []) : (sec.outputs || [])).slice();
+
 				if (chip.chipName in _.portDefinitions) {
-					if (_.portDefinitions[chip.chipName].extraInputs) {
-						let extraPorts = _.portDefinitions[chip.chipName][loop === 'input' ? 'extraInputs' : 'extraOutputs'] || [];
+					const def = _.portDefinitions[chip.chipName];
+
+					const extraKey = loop === 'input' ? 'extraInputs' : 'extraOutputs';
+					const extraPorts = Array.isArray(def[extraKey]) ? def[extraKey] : [];
+					if (extraPorts.length > 0) {
 						ports = ports.concat(extraPorts);
 					}
-					if (_.portDefinitions[chip.chipName].replaceOutputs) {
-						let replacePorts = _.portDefinitions[chip.chipName][loop === 'input' ? 'replaceInputs' : 'replaceOutputs'] || [];
-						if (replacePorts.length > 0) {
-							ports = replacePorts;
-						}
+
+					const replaceKey = loop === 'input' ? 'replaceInputs' : 'replaceOutputs';
+					const replacePorts = Array.isArray(def[replaceKey]) ? def[replaceKey] : [];
+					if (replacePorts.length > 0) {
+						ports = replacePorts.slice();
 					}
 				}
+
+				// Store the resolved ports on the cloned node data so render(null, ...) can return them
+				// without mutating the cached JSON objects used for later renders.
+				if (!element) {
+					if (loop === 'input') {
+						sec.inputs = ports;
+					} else {
+						sec.outputs = ports;
+					}
+				}
+
 				ports.forEach(port => {
 					let portType = 'object';
 					$.each(_.portTypeDefinitions, function(key, value) {
@@ -555,12 +580,15 @@ export const chip = {
 		} else {
 			return {
 				html: chipHTML,
-				object: chip,
+				object: {
+					...chip,
+					nodeDescs: _.nodes,
+				},
 			};
 		}
 	},
 	async get(chipName) {
-		let jsonData = await getJSON(true);
+		let jsonData = await getJSON({ combineResults: true });
 		chipName = chipName.replace(/\s/gm, '');
 		return jsonData[chipName];
 	},

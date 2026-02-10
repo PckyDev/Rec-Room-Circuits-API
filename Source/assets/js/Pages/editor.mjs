@@ -527,9 +527,377 @@ $(function () {
 					return null;
 				},
 				_getWireStrokeForPorts: (fromPortEl, toPortEl) => {
-					// Only exec->exec wires inherit port color.
-					if (!_.graph.functions._isExecPortEl(fromPortEl) || !_.graph.functions._isExecPortEl(toPortEl)) return null;
+					// Prefer the output-side port color if available.
 					return _.graph.functions._getPortColor(fromPortEl) || _.graph.functions._getPortColor(toPortEl);
+				},
+				_normalizeTypeName: (typeName) => {
+					if (typeName == null) return null;
+					const s = String(typeName).trim();
+					if (!s) return null;
+					return s.toLowerCase();
+				},
+				_canonicalTypeName: (typeName) => {
+					let s = _.graph.functions._normalizeTypeName(typeName);
+					if (!s) return null;
+
+					// Remove common decorations/containers.
+					// Examples: "float (0-1)" -> "float", "List<float>" -> "list", "float?" -> "float"
+					s = s.replace(/\s+/g, '');
+					for (const sep of ['<', '(', '[', '{']) {
+						const i = s.indexOf(sep);
+						if (i >= 0) s = s.slice(0, i);
+					}
+					s = s.replace(/[?]/g, '');
+
+					// If it's a namespaced type, keep the last segment.
+					if (s.includes('.')) s = s.split('.').filter(Boolean).at(-1) || s;
+
+					// Map common aliases to canonical names.
+					const aliasMap = {
+						'boolean': 'bool',
+						'bool': 'bool',
+						'int32': 'int',
+						'int64': 'int',
+						'integer': 'int',
+						'int': 'int',
+						'single': 'float',
+						'float32': 'float',
+						'float': 'float',
+						'double': 'double',
+						'float64': 'double',
+						'number': 'float',
+						'color': 'color',
+						'string': 'string',
+						'player': 'player',
+						'exec': 'exec',
+						'any': 'any',
+						't': 't'
+					};
+
+					return aliasMap[s] || s;
+				},
+				_parseAllowedTypesFromTypeParam: (typeParamString) => {
+					if (!typeParamString) return [];
+					let s = String(typeParamString).trim();
+					// Common formats: "(float, int)", "float|int", "float, int"
+					s = s.replace(/[()\[\]{}]/g, '');
+					return s
+						.split(/[,|]/g)
+						.map(t => _.graph.functions._canonicalTypeName(t))
+						.filter(t => !!t);
+				},
+				_getPortMeta: (nodeId, portId) => {
+					if (!nodeId || !portId) return null;
+					const nodeData = (_.graph.data.nodes || []).find(n => n.id === nodeId);
+					const nodeDescs = nodeData?.object?.nodeDescs;
+					if (!Array.isArray(nodeDescs)) return null;
+
+					for (const desc of nodeDescs) {
+						const inputs = Array.isArray(desc?.inputs) ? desc.inputs : [];
+						for (const p of inputs) {
+							if (p?.portId === portId) return { nodeDesc: desc, port: p, dir: 'input' };
+						}
+						const outputs = Array.isArray(desc?.outputs) ? desc.outputs : [];
+						for (const p of outputs) {
+							if (p?.portId === portId) return { nodeDesc: desc, port: p, dir: 'output' };
+						}
+					}
+
+					return null;
+				},
+				_getPortTypeName: (nodeId, portId, portEl) => {
+					const meta = _.graph.functions._getPortMeta(nodeId, portId);
+					const t0 = meta?.port?.type;
+					if (t0 != null && String(t0).trim() !== '') return String(t0);
+					const attr = (portEl?.getAttribute && portEl.getAttribute('porttype')) || null;
+					return attr;
+				},
+				_getAllowedTypeSetForPort: (nodeId, portId, portEl) => {
+					const typeNameRaw = _.graph.functions._getPortTypeName(nodeId, portId, portEl);
+					const typeNorm = _.graph.functions._canonicalTypeName(typeNameRaw);
+					if (!typeNorm) return null;
+
+					// Exec is handled as a concrete, single-type set.
+					if (typeNorm === 'exec') return { wildcard: false, set: new Set(['exec']) };
+
+					const meta = _.graph.functions._getPortMeta(nodeId, portId);
+					const typeParams = Array.isArray(meta?.nodeDesc?.typeParams) ? meta.nodeDesc.typeParams : [];
+
+					// If this port is a generic type (e.g. "T" or "any"), constrain by its typeParam list.
+					let param = typeParams.find(tp => _.graph.functions._canonicalTypeName(tp?.name) === typeNorm) || null;
+					if (!param && (typeNorm === 't' || typeNorm === 'any') && typeParams.length === 1) {
+						param = typeParams[0];
+					}
+
+					if (param) {
+						const allowed = _.graph.functions._parseAllowedTypesFromTypeParam(param.type);
+						if (allowed.length === 0) return { wildcard: true, set: null };
+						return { wildcard: false, set: new Set(allowed) };
+					}
+
+					// Unconstrained "any" is a true wildcard.
+					if (typeNorm === 'any') return { wildcard: true, set: null };
+
+					// Concrete type: must match exactly.
+					return { wildcard: false, set: new Set([typeNorm]) };
+				},
+				_areTypesCompatible: (fromInfo, toInfo) => {
+					if (!fromInfo || !toInfo) return false;
+					if (fromInfo.wildcard || toInfo.wildcard) return true;
+					if (!fromInfo.set || !toInfo.set) return false;
+					for (const t of fromInfo.set) {
+						if (toInfo.set.has(t)) return true;
+					}
+					return false;
+				},
+				_getTypeParamForPort: (nodeId, portId, portEl) => {
+					const typeNameRaw = _.graph.functions._getPortTypeName(nodeId, portId, portEl);
+					const typeNorm = _.graph.functions._canonicalTypeName(typeNameRaw);
+					if (!typeNorm) return null;
+
+					const meta = _.graph.functions._getPortMeta(nodeId, portId);
+					const typeParams = Array.isArray(meta?.nodeDesc?.typeParams) ? meta.nodeDesc.typeParams : [];
+					let param = typeParams.find(tp => _.graph.functions._canonicalTypeName(tp?.name) === typeNorm) || null;
+					if (!param && (typeNorm === 't' || typeNorm === 'any') && typeParams.length === 1) {
+						param = typeParams[0];
+					}
+					return param;
+				},
+				_isColorAdaptivePort: (nodeId, portId, portEl) => {
+					const typeNameRaw = _.graph.functions._getPortTypeName(nodeId, portId, portEl);
+					const typeNorm = _.graph.functions._canonicalTypeName(typeNameRaw);
+					if (!typeNorm) return false;
+					if (typeNorm === 'exec') return false;
+					if (typeNorm === 'any') return true;
+					// Generic ports like T (or any named type param) are also color-adaptive.
+					return !!_.graph.functions._getTypeParamForPort(nodeId, portId, portEl);
+				},
+				_setAnyPortColorOverride: (portEl, color) => {
+					if (!portEl || !color) return;
+					if (portEl.dataset.anyColorOverride !== '1') {
+						portEl.dataset.anyPrevPortColor = portEl.style.getPropertyValue('--port-color') || '';
+						portEl.dataset.anyPrevBg = portEl.style.getPropertyValue('background-color') || '';
+						portEl.dataset.anyPrevBorder = portEl.style.getPropertyValue('border-color') || '';
+						portEl.dataset.anyPrevColor = portEl.style.getPropertyValue('color') || '';
+					}
+					portEl.dataset.anyColorOverride = '1';
+					portEl.style.setProperty('--port-color', color);
+					// Also set explicit colors so it works even if CSS doesn't use --port-color.
+					portEl.style.setProperty('background-color', color);
+					portEl.style.setProperty('border-color', color);
+					portEl.style.setProperty('color', color);
+				},
+				_clearAnyPortColorOverride: (portEl) => {
+					if (!portEl) return;
+					if (portEl.dataset.anyColorOverride !== '1') return;
+					const prevPortColor = portEl.dataset.anyPrevPortColor ?? '';
+					const prevBg = portEl.dataset.anyPrevBg ?? '';
+					const prevBorder = portEl.dataset.anyPrevBorder ?? '';
+					const prevColor = portEl.dataset.anyPrevColor ?? '';
+
+					if (prevPortColor) portEl.style.setProperty('--port-color', prevPortColor);
+					else portEl.style.removeProperty('--port-color');
+
+					if (prevBg) portEl.style.setProperty('background-color', prevBg);
+					else portEl.style.removeProperty('background-color');
+
+					if (prevBorder) portEl.style.setProperty('border-color', prevBorder);
+					else portEl.style.removeProperty('border-color');
+
+					if (prevColor) portEl.style.setProperty('color', prevColor);
+					else portEl.style.removeProperty('color');
+
+					delete portEl.dataset.anyColorOverride;
+					delete portEl.dataset.anyPrevPortColor;
+					delete portEl.dataset.anyPrevBg;
+					delete portEl.dataset.anyPrevBorder;
+					delete portEl.dataset.anyPrevColor;
+				},
+				_updateAnyPortColorOverrides: () => {
+					const prev = _.graph.data._anyPortColorOverrides || {};
+					const next = {};
+
+					const connections = _.graph.data.connections || [];
+					for (const conn of connections) {
+						const fromPortEl = _.graph.functions._findPortEl(conn.from?.nodeId, conn.from?.portId);
+						const toPortEl = _.graph.functions._findPortEl(conn.to?.nodeId, conn.to?.portId);
+						if (!fromPortEl || !toPortEl) continue;
+
+						const fromIsAny = _.graph.functions._isColorAdaptivePort(conn.from.nodeId, conn.from.portId, fromPortEl);
+						const toIsAny = _.graph.functions._isColorAdaptivePort(conn.to.nodeId, conn.to.portId, toPortEl);
+
+						// Only override when exactly one side is a color-adaptive (any/generic) port.
+						if (fromIsAny === toIsAny) continue;
+
+						if (fromIsAny) {
+							const c = _.graph.functions._getPortColor(toPortEl);
+							if (!c) continue;
+							const key = `${conn.from.nodeId}::${conn.from.portId}`;
+							if (!(key in next)) next[key] = c;
+						} else if (toIsAny) {
+							const c = _.graph.functions._getPortColor(fromPortEl);
+							if (!c) continue;
+							const key = `${conn.to.nodeId}::${conn.to.portId}`;
+							if (!(key in next)) next[key] = c;
+						}
+					}
+
+					// Clear overrides no longer needed.
+					for (const key of Object.keys(prev)) {
+						if (key in next) continue;
+						const [nodeId, portId] = key.split('::');
+						const portEl = _.graph.functions._findPortEl(nodeId, portId);
+						_.graph.functions._clearAnyPortColorOverride(portEl);
+					}
+
+					// Apply new/changed overrides.
+					for (const key of Object.keys(next)) {
+						if (prev[key] === next[key]) continue;
+						const [nodeId, portId] = key.split('::');
+						const portEl = _.graph.functions._findPortEl(nodeId, portId);
+						_.graph.functions._setAnyPortColorOverride(portEl, next[key]);
+					}
+
+					_.graph.data._anyPortColorOverrides = next;
+				},
+				_updatePortConnectedClasses: () => {
+					const prevSet = _.graph.data._connectedPortSet || new Set();
+					const nextSet = new Set();
+
+					const connections = _.graph.data.connections || [];
+					for (const conn of connections) {
+						const fromNodeId = conn.from?.nodeId;
+						const fromPortId = conn.from?.portId;
+						const toNodeId = conn.to?.nodeId;
+						const toPortId = conn.to?.portId;
+						if (!fromNodeId || !fromPortId || !toNodeId || !toPortId) continue;
+
+						const fromPortEl = _.graph.functions._findPortEl(fromNodeId, fromPortId);
+						const toPortEl = _.graph.functions._findPortEl(toNodeId, toPortId);
+
+						if (fromPortEl) nextSet.add(`${fromNodeId}::${fromPortId}`);
+						if (toPortEl) nextSet.add(`${toNodeId}::${toPortId}`);
+					}
+
+					const getContainer = (portEl) => portEl?.closest?.('.port-container') || portEl?.parentElement || null;
+
+					// Remove class for ports no longer connected.
+					for (const key of prevSet) {
+						if (nextSet.has(key)) continue;
+						const [nodeId, portId] = String(key).split('::');
+						const portEl = _.graph.functions._findPortEl(nodeId, portId);
+						if (portEl) {
+							portEl.classList.remove('connected');
+							getContainer(portEl)?.classList?.remove?.('connected');
+						}
+					}
+
+					// Add class for newly connected ports.
+					for (const key of nextSet) {
+						if (prevSet.has(key)) continue;
+						const [nodeId, portId] = String(key).split('::');
+						const portEl = _.graph.functions._findPortEl(nodeId, portId);
+						if (portEl) {
+							portEl.classList.add('connected');
+							getContainer(portEl)?.classList?.add?.('connected');
+						}
+					}
+
+					_.graph.data._connectedPortSet = nextSet;
+				},
+				_getPortContainerEl: (portEl) => {
+					return portEl?.closest?.('.port-container') || portEl?.parentElement || null;
+				},
+				_clearCannotConnectHover: () => {
+					const prevKey = _.graph.data._cannotConnectHoverKey;
+					if (!prevKey) return;
+					const [nodeId, portId] = String(prevKey).split('::');
+					const prevPortEl = _.graph.functions._findPortEl(nodeId, portId);
+					if (prevPortEl) {
+						prevPortEl.classList.remove('cannot-connect');
+						_.graph.functions._getPortContainerEl(prevPortEl)?.classList?.remove?.('cannot-connect');
+					}
+					_.graph.data._cannotConnectHoverKey = null;
+				},
+				_canConnectPorts: (fromNodeId, fromPortId, toNodeId, toPortId) => {
+					if (!fromNodeId || !fromPortId || !toNodeId || !toPortId) return false;
+					if (fromNodeId === toNodeId && fromPortId === toPortId) return false;
+
+					const fromPortEl0 = _.graph.functions._findPortEl(fromNodeId, fromPortId);
+					const toPortEl0 = _.graph.functions._findPortEl(toNodeId, toPortId);
+					if (!fromPortEl0 || !toPortEl0) return false;
+
+					let from = { nodeId: fromNodeId, portId: fromPortId, role: _.graph.functions._getPortRole(fromPortEl0) };
+					let to = { nodeId: toNodeId, portId: toPortId, role: _.graph.functions._getPortRole(toPortEl0) };
+
+					// Normalize direction: output -> input
+					if (from.role !== 'output' && to.role === 'output') {
+						[from, to] = [to, from];
+					}
+
+					const fromPortEl = _.graph.functions._findPortEl(from.nodeId, from.portId);
+					const toPortEl = _.graph.functions._findPortEl(to.nodeId, to.portId);
+					if (!fromPortEl || !toPortEl) return false;
+
+					from.role = _.graph.functions._getPortRole(fromPortEl);
+					to.role = _.graph.functions._getPortRole(toPortEl);
+
+					// Enforce output -> input if roles are known
+					if (from.role && to.role && !(from.role === 'output' && to.role === 'input')) return false;
+
+					// Enforce exec-only connections.
+					const fromIsExec = _.graph.functions._isExecPortEl(fromPortEl);
+					const toIsExec = _.graph.functions._isExecPortEl(toPortEl);
+					if (fromIsExec !== toIsExec) return false;
+
+					// Enforce type compatibility.
+					const fromTypeInfo = _.graph.functions._getAllowedTypeSetForPort(from.nodeId, from.portId, fromPortEl);
+					const toTypeInfo = _.graph.functions._getAllowedTypeSetForPort(to.nodeId, to.portId, toPortEl);
+					if (!_.graph.functions._areTypesCompatible(fromTypeInfo, toTypeInfo)) return false;
+
+					return true;
+				},
+				_updateCannotConnectHover: (clientX, clientY) => {
+					const drag = _.graph.data._connectionDrag;
+					if (!drag?.active) {
+						_.graph.functions._clearCannotConnectHover();
+						return;
+					}
+
+					const el = document.elementFromPoint(clientX, clientY);
+					const portEl = el?.closest?.('.port');
+					if (!portEl) {
+						_.graph.functions._clearCannotConnectHover();
+						return;
+					}
+
+					const nodeEl = portEl.closest?.('.chip');
+					const toNodeId = nodeEl?.id;
+					const toPortId = portEl.getAttribute?.('id');
+					if (!toNodeId || !toPortId) {
+						_.graph.functions._clearCannotConnectHover();
+						return;
+					}
+
+					const nextKey = `${toNodeId}::${toPortId}`;
+					const can = _.graph.functions._canConnectPorts(drag.from.nodeId, drag.from.portId, toNodeId, toPortId);
+					const prevKey = _.graph.data._cannotConnectHoverKey;
+
+					// If it can connect, ensure we clear any previous cannot-connect highlight.
+					if (can) {
+						if (prevKey) _.graph.functions._clearCannotConnectHover();
+						return;
+					}
+
+					// It cannot connect: update highlight if the hovered target changed.
+					if (prevKey && prevKey !== nextKey) {
+						_.graph.functions._clearCannotConnectHover();
+					}
+
+					// Apply cannot-connect to the hovered port + its container.
+					portEl.classList.add('cannot-connect');
+					_.graph.functions._getPortContainerEl(portEl)?.classList?.add?.('cannot-connect');
+					_.graph.data._cannotConnectHoverKey = nextKey;
 				},
 				_getWireStrokeWidth: () => {
 					// Wires are drawn in viewport (screen) space, so scale width manually with zoom.
@@ -602,6 +970,10 @@ $(function () {
 					if (!layer) return;
 
 					const strokeWidth = _.graph.functions._getWireStrokeWidth();
+
+					// Update any-port color overrides first so wire strokes reflect the new colors immediately.
+					_.graph.functions._updateAnyPortColorOverrides();
+					_.graph.functions._updatePortConnectedClasses();
 
 					// Permanent wires
 					(_.graph.data.connections || []).forEach((conn) => {
@@ -713,6 +1085,33 @@ $(function () {
 					_.graph.data.connections = kept;
 					_.graph.functions.updateConnections();
 				},
+				removeConnectionsToPort: (nodeId, portId) => {
+					if (!nodeId || !portId) return;
+
+					const connections = _.graph.data.connections || [];
+					if (connections.length === 0) return;
+
+					const kept = [];
+					let removedAny = false;
+
+					for (const conn of connections) {
+						const matches = conn.to?.nodeId === nodeId && conn.to?.portId === portId;
+						if (matches) {
+							removedAny = true;
+							try {
+								conn.element?.remove?.();
+							} catch {
+								// ignore
+							}
+						} else {
+							kept.push(conn);
+						}
+					}
+
+					if (!removedAny) return;
+					_.graph.data.connections = kept;
+					_.graph.functions.updateConnections();
+				},
 				startConnection: (fromNodeId, fromPortId, startEvent) => {
 					const layer = _.graph.functions._ensureWireLayer();
 					if (!layer) return;
@@ -723,10 +1122,8 @@ $(function () {
 					const fromPortEl = _.graph.functions._findPortEl(fromNodeId, fromPortId);
 					if (!fromPortEl) return;
 
-					// Tint the temp wire if we're dragging from an exec port.
-					const tempStroke = _.graph.functions._isExecPortEl(fromPortEl)
-						? (_.graph.functions._getPortColor(fromPortEl) || '#7aa2ff')
-						: '#7aa2ff';
+					// Tint the temp wire to match the origin port (fallback to default).
+					const tempStroke = _.graph.functions._getPortColor(fromPortEl) || '#7aa2ff';
 					layer.tempPath.setAttribute('stroke', tempStroke);
 					layer.tempPath.style.filter = `drop-shadow(0 0 3px ${_.graph.functions._colorWithAlpha(tempStroke, 0.35)})`;
 
@@ -787,6 +1184,7 @@ $(function () {
 							y: e.clientY - vpRect.top
 						};
 						_.graph.functions.updateConnections();
+						_.graph.functions._updateCannotConnectHover(e.clientX, e.clientY);
 					};
 
 					drag.handlers.onUp = (e) => {
@@ -869,6 +1267,18 @@ $(function () {
 						[from, to] = [to, from];
 					}
 
+					// Re-resolve port elements after normalization (in case we swapped).
+					const fromPortElN = _.graph.functions._findPortEl(from.nodeId, from.portId);
+					const toPortElN = _.graph.functions._findPortEl(to.nodeId, to.portId);
+					if (!fromPortElN || !toPortElN) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					// Recompute roles post-normalization so subsequent rules are correct.
+					from.role = _.graph.functions._getPortRole(fromPortElN);
+					to.role = _.graph.functions._getPortRole(toPortElN);
+
 					// Enforce output -> input if roles are known
 					if (from.role && to.role && !(from.role === 'output' && to.role === 'input')) {
 						_.graph.functions.cancelConnection();
@@ -876,23 +1286,37 @@ $(function () {
 					}
 
 					// Enforce: exec ports can only connect to exec ports.
-					const fromIsExec = _.graph.functions._isExecPortEl(fromPortEl);
-					const toIsExec = _.graph.functions._isExecPortEl(toPortEl);
+					const fromIsExec = _.graph.functions._isExecPortEl(fromPortElN);
+					const toIsExec = _.graph.functions._isExecPortEl(toPortElN);
 					if (fromIsExec !== toIsExec) {
 						_.graph.functions.cancelConnection();
 						return;
 					}
 
+					// Enforce: non-exec ports can only connect to compatible types.
+					const fromTypeInfo = _.graph.functions._getAllowedTypeSetForPort(from.nodeId, from.portId, fromPortElN);
+					const toTypeInfo = _.graph.functions._getAllowedTypeSetForPort(to.nodeId, to.portId, toPortElN);
+					if (!_.graph.functions._areTypesCompatible(fromTypeInfo, toTypeInfo)) {
+						_.graph.functions.cancelConnection();
+						return;
+					}
+
+					// Enforce: data (non-exec) input ports can have only 1 incoming connection.
+					// New connection overwrites the old incoming connection.
+					if (to.role === 'input' && !toIsExec) {
+						_.graph.functions.removeConnectionsToPort(to.nodeId, to.portId);
+					}
+
 					// Enforce: exec output ports can have only 1 connection. New connection overwrites old.
 					// Exec input ports can have multiple connections.
-					if (from.role === 'output' && _.graph.functions._isExecPortEl(fromPortEl)) {
+					if (from.role === 'output' && _.graph.functions._isExecPortEl(fromPortElN)) {
 						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId);
 					}
 
 					const svgNS = 'http://www.w3.org/2000/svg';
 					const path = document.createElementNS(svgNS, 'path');
 					path.setAttribute('fill', 'none');
-					const stroke = _.graph.functions._getWireStrokeForPorts(fromPortEl, toPortEl) || '#b7c7ff';
+					const stroke = _.graph.functions._getWireStrokeForPorts(fromPortElN, toPortElN) || '#b7c7ff';
 					path.setAttribute('stroke', stroke);
 					path.setAttribute('stroke-width', String(_.graph.functions._getWireStrokeWidth()));
 					path.setAttribute('stroke-linecap', 'round');
@@ -928,6 +1352,8 @@ $(function () {
 						window.removeEventListener('mouseup', drag.handlers.onUp, true);
 						window.removeEventListener('keydown', drag.handlers.onKey, true);
 					}
+
+					_.graph.functions._clearCannotConnectHover();
 
 					_.graph.data._connectionDrag = null;
 				},
