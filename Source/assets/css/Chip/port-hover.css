@@ -1,8 +1,8 @@
 .port-hover {
   --port-hover-size: 2rem;
   position: absolute;
-  /*left: 50%;*/
-  /*top: 50%;*/
+  left: 50%;
+  top: 50%;
   width: var(--port-hover-size);
   height: var(--port-hover-size);
   border-radius: calc(var(--rr-border-radius) * 2);
@@ -53,5 +53,28 @@
   font-size: 1rem;
   color: #f7f04d;
   font-weight: 500;
+}
+
+.port-hover svg {
+  position: absolute;
+  font-size: 2.5rem;
+  color: #f9312f;
+  display: none;
+}
+
+.connected .port-hover .disconnect {
+  display: block;
+}
+
+.cannot-connect .port-hover .not-allowed {
+  display: block;
+}
+
+.port-hover .not-allowed {
+  font-size: 2rem;
+}
+
+.cannot-connect .port-hover, .connected .port-hover {
+  outline: none;
 }
 
