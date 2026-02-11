@@ -123,7 +123,7 @@ The search method will by default fetch the chip data from the API for every sea
 The API includes a rendering function that allows you to create a visual representation of a chip or object board using HTML and CSS. You can use this function like so:
 ```javascript
 // Render a chip or object board by name
-const chipElement = chip.render(element, chip, options);
+chip.render(element, chip, options);
 
 // element is the DOM element (or jQuery selector) where the chip will be rendered
 // You can leave element undefined or null to create the chip rendering data without actually rendering it to the DOM.
