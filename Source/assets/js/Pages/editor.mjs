@@ -282,6 +282,14 @@ $(function () {
 				_nextNodeId: 0,
 				_nodeClipboard: null,
 				_pasteSerial: 0,
+				_history: {
+					undo: [],
+					redo: [],
+					max: 50,
+					inBatch: false,
+					batchRecorded: false,
+					restoring: false
+				},
 				nodes: [],
 				// Example node object structure:
 				// {
@@ -344,11 +352,144 @@ $(function () {
 				_.graph.node.setNodeDeletionHandler();
 				// Enable Ctrl/Cmd+C/V/X for selected nodes.
 				_.graph.node.setCopyPasteHandler();
+				// Enable Ctrl/Cmd+Z and Ctrl/Cmd+Y (or Shift+Cmd+Z) for undo/redo.
+				_.graph.node.setUndoRedoHandler();
 
 				// For testing: add a node to the center of the graph
 				// await _.graph.node.add('Add Tag');
 			},
 			functions: {
+				_captureGraphSnapshot: () => {
+					const camera = _.graph.data.cameraState || {};
+					const nodes = (_.graph.data.nodes || []).map((n) => {
+						const leftRaw = n?.element?.css?.('left');
+						const topRaw = n?.element?.css?.('top');
+						const x = Number.parseFloat(String(leftRaw || '0')) || 0;
+						const y = Number.parseFloat(String(topRaw || '0')) || 0;
+						return {
+							id: n.id,
+							payload: n.object ?? null,
+							x,
+							y,
+							selected: !!n.selected
+						};
+					});
+
+					const connections = (_.graph.data.connections || []).map(c => ({
+						from: { nodeId: c?.from?.nodeId, portId: c?.from?.portId },
+						to: { nodeId: c?.to?.nodeId, portId: c?.to?.portId }
+					})).filter(c => c.from.nodeId && c.from.portId && c.to.nodeId && c.to.portId);
+
+					return {
+						camera: {
+							tx: Number(camera.tx ?? 0),
+							ty: Number(camera.ty ?? 0),
+							scale: Number(camera.scale ?? 1)
+						},
+						nodes,
+						connections
+					};
+				},
+				_recordHistory: () => {
+					const h = _.graph.data._history;
+					if (!h || h.restoring) return;
+					if (h.inBatch && h.batchRecorded) return;
+
+					const snap = _.graph.functions._captureGraphSnapshot();
+					h.undo.push(snap);
+					if (h.undo.length > (h.max || 50)) h.undo.shift();
+					h.redo.length = 0;
+					if (h.inBatch) h.batchRecorded = true;
+				},
+				_historyBeginBatch: () => {
+					const h = _.graph.data._history;
+					if (!h) return;
+					h.inBatch = true;
+					h.batchRecorded = false;
+				},
+				_historyEndBatch: () => {
+					const h = _.graph.data._history;
+					if (!h) return;
+					h.inBatch = false;
+					h.batchRecorded = false;
+				},
+				_restoreGraphSnapshot: async (snap) => {
+					if (!snap) return;
+					const h = _.graph.data._history;
+					if (!h) return;
+					h.restoring = true;
+					try {
+						// Stop any in-progress gestures.
+						if (_.graph.data._connectionDrag?.active) _.graph.functions.cancelConnection();
+
+						// Remove existing connections (DOM + data).
+						for (const conn of (_.graph.data.connections || [])) {
+							try { conn.element?.remove?.(); } catch { /* ignore */ }
+						}
+						_.graph.data.connections = [];
+
+						// Remove existing nodes (DOM + data).
+						for (const n of (_.graph.data.nodes || [])) {
+							try { n.element?.remove?.(); } catch { /* ignore */ }
+						}
+						_.graph.data.nodes = [];
+
+						// Restore camera.
+						if (snap.camera) {
+							_.graph.data.cameraState.tx = Number(snap.camera.tx ?? 0);
+							_.graph.data.cameraState.ty = Number(snap.camera.ty ?? 0);
+							_.graph.data.cameraState.scale = Number(snap.camera.scale ?? 1);
+						}
+
+						// Restore nodes with stable ids.
+						let nextId = 0;
+						const nodes = Array.isArray(snap.nodes) ? snap.nodes : [];
+						for (const n of nodes) {
+							const id = String(n.id || '');
+							const m = id.match(/^node-(\d+)$/);
+							if (m) nextId = Math.max(nextId, Number(m[1]) + 1);
+
+							const payload = n.payload ?? null;
+							const addArg = payload?.chipName ? payload.chipName : payload;
+							const created = await _.graph.node.add(addArg, { id, skipHistory: true });
+							if (!created?.id) continue;
+							await _.graph.node.setPosition(created.id, Number(n.x ?? 0), Number(n.y ?? 0));
+							if (n.selected) _.graph.functions.selectNode(created.id);
+						}
+						_.graph.data._nextNodeId = Math.max(Number(_.graph.data._nextNodeId || 0), nextId);
+
+						// Restore connections.
+						const conns = Array.isArray(snap.connections) ? snap.connections : [];
+						for (const c of conns) {
+							_.graph.functions.addConnection?.(c?.from?.nodeId, c?.from?.portId, c?.to?.nodeId, c?.to?.portId, { skipHistory: true });
+						}
+
+						_.graph.functions.requestRender?.();
+						_.graph.functions.updateConnections?.();
+					} finally {
+						h.restoring = false;
+					}
+				},
+				undo: async () => {
+					const h = _.graph.data._history;
+					if (!h || h.restoring) return;
+					if ((h.undo || []).length === 0) return;
+
+					const current = _.graph.functions._captureGraphSnapshot();
+					h.redo.push(current);
+					const prev = h.undo.pop();
+					await _.graph.functions._restoreGraphSnapshot(prev);
+				},
+				redo: async () => {
+					const h = _.graph.data._history;
+					if (!h || h.restoring) return;
+					if ((h.redo || []).length === 0) return;
+
+					const current = _.graph.functions._captureGraphSnapshot();
+					h.undo.push(current);
+					const next = h.redo.pop();
+					await _.graph.functions._restoreGraphSnapshot(next);
+				},
 				clamp: (v, a, b) => {
 					return Math.max(a, Math.min(b, v));
 				},
@@ -434,6 +575,7 @@ $(function () {
 					return _.graph.data.nodes.filter(n => n.selected);
 				},
 				deleteNode: (node) => {
+					_.graph.functions._recordHistory?.();
 					const nodeElement = _.graph.functions.validateNode(node);
 					if (!nodeElement || nodeElement.length === 0) return;
 
@@ -1180,11 +1322,18 @@ $(function () {
 					layer.tempPath.setAttribute('stroke-width', String(strokeWidth));
 					layer.tempPath.setAttribute('d', _.graph.functions._buildBezierPath(p0, p1, side0, side1));
 				},
-				removeConnectionsForPort: (nodeId, portId) => {
+				removeConnectionsForPort: (nodeId, portId, options = null) => {
 					if (!nodeId || !portId) return;
+					const skipHistory = !!options?.skipHistory;
 
 					const connections = _.graph.data.connections || [];
 					if (connections.length === 0) return;
+					const willRemove = connections.some((conn) =>
+						(conn.from?.nodeId === nodeId && conn.from?.portId === portId) ||
+						(conn.to?.nodeId === nodeId && conn.to?.portId === portId)
+					);
+					if (!willRemove) return;
+					if (!skipHistory) _.graph.functions._recordHistory?.();
 
 					const kept = [];
 					let removedAny = false;
@@ -1205,16 +1354,19 @@ $(function () {
 							kept.push(conn);
 						}
 					}
-
 					if (!removedAny) return;
 					_.graph.data.connections = kept;
 					_.graph.functions.updateConnections();
 				},
-				removeConnectionsFromPort: (nodeId, portId) => {
+				removeConnectionsFromPort: (nodeId, portId, options = null) => {
 					if (!nodeId || !portId) return;
+					const skipHistory = !!options?.skipHistory;
 
 					const connections = _.graph.data.connections || [];
 					if (connections.length === 0) return;
+					const willRemove = connections.some((conn) => conn.from?.nodeId === nodeId && conn.from?.portId === portId);
+					if (!willRemove) return;
+					if (!skipHistory) _.graph.functions._recordHistory?.();
 
 					const kept = [];
 					let removedAny = false;
@@ -1232,16 +1384,19 @@ $(function () {
 							kept.push(conn);
 						}
 					}
-
 					if (!removedAny) return;
 					_.graph.data.connections = kept;
 					_.graph.functions.updateConnections();
 				},
-				removeConnectionsToPort: (nodeId, portId) => {
+				removeConnectionsToPort: (nodeId, portId, options = null) => {
 					if (!nodeId || !portId) return;
+					const skipHistory = !!options?.skipHistory;
 
 					const connections = _.graph.data.connections || [];
 					if (connections.length === 0) return;
+					const willRemove = connections.some((conn) => conn.to?.nodeId === nodeId && conn.to?.portId === portId);
+					if (!willRemove) return;
+					if (!skipHistory) _.graph.functions._recordHistory?.();
 
 					const kept = [];
 					let removedAny = false;
@@ -1259,13 +1414,16 @@ $(function () {
 							kept.push(conn);
 						}
 					}
-
 					if (!removedAny) return;
 					_.graph.data.connections = kept;
 					_.graph.functions.updateConnections();
 				},
-				addConnection: (fromNodeId, fromPortId, toNodeId, toPortId) => {
+				addConnection: (fromNodeId, fromPortId, toNodeId, toPortId, options = null) => {
 					if (!fromNodeId || !fromPortId || !toNodeId || !toPortId) return false;
+					const skipHistory = !!options?.skipHistory;
+					if (!skipHistory) _.graph.functions._historyBeginBatch?.();
+					try {
+						if (!skipHistory) _.graph.functions._recordHistory?.();
 
 					const layer = _.graph.functions._ensureWireLayer();
 					if (!layer) return false;
@@ -1307,12 +1465,12 @@ $(function () {
 
 					// Enforce: data (non-exec) input ports can have only 1 incoming connection.
 					if (to.role === 'input' && !toIsExec) {
-						_.graph.functions.removeConnectionsToPort(to.nodeId, to.portId);
+						_.graph.functions.removeConnectionsToPort(to.nodeId, to.portId, { skipHistory: true });
 					}
 
 					// Enforce: exec output ports can have only 1 connection.
 					if (from.role === 'output' && fromIsExec) {
-						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId);
+						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId, { skipHistory: true });
 					}
 
 					const svgNS = 'http://www.w3.org/2000/svg';
@@ -1336,6 +1494,9 @@ $(function () {
 					_.graph.data.connections.push(connection);
 					_.graph.functions.updateConnections();
 					return true;
+					} finally {
+						if (!skipHistory) _.graph.functions._historyEndBatch?.();
+					}
 				},
 				startConnection: (fromNodeId, fromPortId, startEvent) => {
 					const layer = _.graph.functions._ensureWireLayer();
@@ -1540,16 +1701,21 @@ $(function () {
 						return;
 					}
 
-					// Enforce: data (non-exec) input ports can have only 1 incoming connection.
+					// Create/overwrite is a single undo step.
+					_.graph.functions._historyBeginBatch?.();
+					try {
+						_.graph.functions._recordHistory?.();
+
+						// Enforce: data (non-exec) input ports can have only 1 incoming connection.
 					// New connection overwrites the old incoming connection.
 					if (to.role === 'input' && !toIsExec) {
-						_.graph.functions.removeConnectionsToPort(to.nodeId, to.portId);
+						_.graph.functions.removeConnectionsToPort(to.nodeId, to.portId, { skipHistory: true });
 					}
 
 					// Enforce: exec output ports can have only 1 connection. New connection overwrites old.
 					// Exec input ports can have multiple connections.
 					if (from.role === 'output' && _.graph.functions._isExecPortEl(fromPortElN)) {
-						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId);
+						_.graph.functions.removeConnectionsFromPort(from.nodeId, from.portId, { skipHistory: true });
 					}
 
 					const svgNS = 'http://www.w3.org/2000/svg';
@@ -1576,6 +1742,9 @@ $(function () {
 
 					_.graph.functions.cancelConnection(); // clears temp + handlers
 					_.graph.functions.updateConnections();
+					} finally {
+						_.graph.functions._historyEndBatch?.();
+					}
 				},
 				cancelConnection: () => {
 					const layer = _.graph.data._wireLayer;
@@ -2004,13 +2173,21 @@ $(function () {
 				}
 			},
 			node: {
-				add: async (node) => {
+				add: async (node, options = null) => {
+					const skipHistory = !!options?.skipHistory;
+					if (!skipHistory) _.graph.functions._recordHistory?.();
 					let nodeData = await chip.render(null, node, { log: false, autoFit: false });
 					console.log(nodeData.object);
 					if (nodeData.html) {
-						const idNum = Number.isFinite(Number(_.graph.data._nextNodeId)) ? Number(_.graph.data._nextNodeId) : (_.graph.data.nodes.length || 0);
-						_.graph.data._nextNodeId = idNum + 1;
-						const nodeId = 'node-' + idNum;
+						let nodeId = String(options?.id || '');
+						if (!nodeId) {
+							const idNum = Number.isFinite(Number(_.graph.data._nextNodeId)) ? Number(_.graph.data._nextNodeId) : (_.graph.data.nodes.length || 0);
+							_.graph.data._nextNodeId = idNum + 1;
+							nodeId = 'node-' + idNum;
+						} else {
+							const m = nodeId.match(/^node-(\d+)$/);
+							if (m) _.graph.data._nextNodeId = Math.max(Number(_.graph.data._nextNodeId || 0), Number(m[1]) + 1);
+						}
 						nodeData.html = nodeData.html.replace('class="chip', 'id="' + nodeId + '" class="chip');
 
 						// Give every port a unique id for connections to reference
@@ -2081,6 +2258,8 @@ $(function () {
 						_.graph.node.setNodeDeletionHandler();
 						// Ensure copy/paste handler is installed.
 						_.graph.node.setCopyPasteHandler();
+						// Ensure undo/redo handler is installed.
+						_.graph.node.setUndoRedoHandler();
 
 						return nodeObject;
 
@@ -2138,57 +2317,64 @@ $(function () {
 					return true;
 				},
 				_pasteClipboard: async () => {
-					const clip = _.graph.data._nodeClipboard;
-					if (!clip || !Array.isArray(clip.nodes) || clip.nodes.length === 0) return false;
+					const h = _.graph.data._history;
+					try {
+						return await (async () => {
+							const clip = _.graph.data._nodeClipboard;
+							if (!clip || !Array.isArray(clip.nodes) || clip.nodes.length === 0) return false;
 
-					const vpEl = _.graph.data.elements.graphCanvasViewport.element;
-					if (!vpEl) return false;
+							const vpEl = _.graph.data.elements.graphCanvasViewport.element;
+							if (!vpEl) return false;
 
-					// Paste near viewport center, with a small incremental offset.
-					const centerX = (vpEl.clientWidth * 0.5 - _.graph.data.cameraState.tx) / _.graph.data.cameraState.scale;
-					const centerY = (vpEl.clientHeight * 0.5 - _.graph.data.cameraState.ty) / _.graph.data.cameraState.scale;
-					const serial = Number(_.graph.data._pasteSerial || 0) + 1;
-					_.graph.data._pasteSerial = serial;
-					const delta = 20 * serial;
-					const baseX = centerX + delta;
-					const baseY = centerY + delta;
+							// Paste near viewport center, with a small incremental offset.
+							_.graph.functions._historyBeginBatch?.();
+							// Record a single undo step for the whole paste.
+							_.graph.functions._recordHistory?.();
+							const centerX = (vpEl.clientWidth * 0.5 - _.graph.data.cameraState.tx) / _.graph.data.cameraState.scale;
+							const centerY = (vpEl.clientHeight * 0.5 - _.graph.data.cameraState.ty) / _.graph.data.cameraState.scale;
+							const serial = Number(_.graph.data._pasteSerial || 0) + 1;
+							_.graph.data._pasteSerial = serial;
+							const delta = 20 * serial;
+							const baseX = centerX + delta;
+							const baseY = centerY + delta;
 
-					// Deselect existing nodes so pasted nodes become the active selection.
-					for (const n of (_.graph.data.nodes || [])) {
-						if (n?.selected) _.graph.functions.deselectNode(n.element);
+							// Deselect existing nodes so pasted nodes become the active selection.
+							for (const n of (_.graph.data.nodes || [])) {
+								if (n?.selected) _.graph.functions.deselectNode(n.element);
+							}
+
+							const idMap = new Map();
+							const newIds = [];
+
+							for (const n of clip.nodes) {
+								const payload = n.payload ?? null;
+								const addArg = payload?.chipName ? payload.chipName : payload;
+								const created = await _.graph.node.add(addArg, { skipHistory: true });
+								if (!created?.id) continue;
+
+								idMap.set(n.oldId, created.id);
+								newIds.push(created.id);
+
+								await _.graph.node.setPosition(created.id, baseX + (Number(n.relX) || 0), baseY + (Number(n.relY) || 0));
+							}
+
+							for (const c of (clip.connections || [])) {
+								const fromNodeId = idMap.get(c.fromNodeId);
+								const toNodeId = idMap.get(c.toNodeId);
+								if (!fromNodeId || !toNodeId) continue;
+								_.graph.functions.addConnection?.(fromNodeId, c.fromPortId, toNodeId, c.toPortId, { skipHistory: true });
+							}
+
+							for (const id of newIds) {
+								_.graph.functions.selectNode(id);
+							}
+
+							_.graph.functions.updateConnections?.();
+							return true;
+						})();
+					} finally {
+						if (h) _.graph.functions._historyEndBatch?.();
 					}
-
-					const idMap = new Map();
-					const newIds = [];
-
-					for (const n of clip.nodes) {
-						const payload = n.payload ?? null;
-						// Prefer chipName when available; otherwise fall back to full object payload.
-						const addArg = payload?.chipName ? payload.chipName : payload;
-						const created = await _.graph.node.add(addArg);
-						if (!created?.id) continue;
-
-						idMap.set(n.oldId, created.id);
-						newIds.push(created.id);
-
-						await _.graph.node.setPosition(created.id, baseX + (Number(n.relX) || 0), baseY + (Number(n.relY) || 0));
-					}
-
-					// Recreate internal connections.
-					for (const c of (clip.connections || [])) {
-						const fromNodeId = idMap.get(c.fromNodeId);
-						const toNodeId = idMap.get(c.toNodeId);
-						if (!fromNodeId || !toNodeId) continue;
-						_.graph.functions.addConnection?.(fromNodeId, c.fromPortId, toNodeId, c.toPortId);
-					}
-
-					// Select pasted nodes.
-					for (const id of newIds) {
-						_.graph.functions.selectNode(id);
-					}
-
-					_.graph.functions.updateConnections?.();
-					return true;
 				},
 				setCopyPasteHandler: () => {
 					if (_.graph.data._copyPasteHandlerInstalled) return;
@@ -2238,6 +2424,42 @@ $(function () {
 
 					window.addEventListener('keydown', handler, true);
 					_.graph.data._copyPasteHandler = handler;
+				},
+				setUndoRedoHandler: () => {
+					if (_.graph.data._undoRedoHandlerInstalled) return;
+					_.graph.data._undoRedoHandlerInstalled = true;
+
+					const handler = (e) => {
+						// Don't interfere while dragging a connection.
+						if (_.graph.data._connectionDrag?.active) return;
+
+						// Ignore while typing in inputs.
+						const ae = document.activeElement;
+						const tag = String(ae?.tagName || '').toLowerCase();
+						const isTyping = tag === 'input' || tag === 'textarea' || ae?.isContentEditable;
+						if (isTyping) return;
+
+						const ctrlOrCmd = !!(e.ctrlKey || e.metaKey);
+						if (!ctrlOrCmd) return;
+
+						const key = String(e.key || '').toLowerCase();
+						const isZ = key === 'z';
+						const isY = key === 'y';
+						if (!isZ && !isY) return;
+
+						e.preventDefault();
+						e.stopPropagation();
+
+						if (isY || (isZ && e.shiftKey)) {
+							Promise.resolve(_.graph.functions.redo?.()).catch(() => { /* ignore */ });
+							return;
+						}
+
+						Promise.resolve(_.graph.functions.undo?.()).catch(() => { /* ignore */ });
+					};
+
+					window.addEventListener('keydown', handler, true);
+					_.graph.data._undoRedoHandler = handler;
 				},
 				setNodeDeletionHandler: () => {
 					if (_.graph.data._nodeDeletionHandlerInstalled) return;
@@ -2308,6 +2530,7 @@ $(function () {
 					if (!vpEl) return;
 
 					let isDragging = false;
+					let dragHistoryRecorded = false;
 
 					// Nodes we are dragging in this gesture (supports multi-select)
 					let dragNodes = [];
@@ -2332,6 +2555,10 @@ $(function () {
 						if (dragTarget?.closest?.('.port')) return;
 
 						e.preventDefault();
+						if (!dragHistoryRecorded) {
+							_.graph.functions._recordHistory?.();
+							dragHistoryRecorded = true;
+						}
 
 						isDragging = true;
 
@@ -2390,6 +2617,7 @@ $(function () {
 							if (!isDragging) return;
 
 							isDragging = false;
+							dragHistoryRecorded = false;
 							dragNodes.forEach(el => el.removeClass('grabbing'));
 
 							dragNodes = [];
@@ -2407,6 +2635,10 @@ $(function () {
 						if (dragTarget?.closest?.('.port')) return;
 
 						e.preventDefault();
+						if (!dragHistoryRecorded) {
+							_.graph.functions._recordHistory?.();
+							dragHistoryRecorded = true;
+						}
 						isDragging = true;
 						const activePointerId = e.pointerId;
 						try { nodeElement[0].setPointerCapture(activePointerId); } catch { /* ignore */ }
@@ -2453,6 +2685,7 @@ $(function () {
 							if (!isDragging) return;
 							if (ev && ev.pointerId != null && ev.pointerId !== activePointerId) return;
 							isDragging = false;
+							dragHistoryRecorded = false;
 							dragNodes.forEach(el => el.removeClass('grabbing'));
 							dragNodes = [];
 							grabOffsets.clear();
