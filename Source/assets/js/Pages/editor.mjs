@@ -279,6 +279,7 @@ $(function () {
 				BASE_MAJOR: 100,
 				BASE_MINOR: 25,
 				rafPending: false,
+				_nextNodeId: 0,
 				nodes: [],
 				// Example node object structure:
 				// {
@@ -327,6 +328,18 @@ $(function () {
 					_.graph.data.cameraState.ty = vpEl.clientHeight * 0.5;
 				}
 				_.graph.functions.requestRender();
+
+				// Initialize node id counter from any existing nodes.
+				_.graph.data._nextNodeId = Math.max(
+					Number(_.graph.data._nextNodeId || 0),
+					...(_.graph.data.nodes || []).map(n => {
+						const m = String(n?.id || '').match(/^node-(\d+)$/);
+						return m ? Number(m[1]) + 1 : 0;
+					})
+				);
+
+				// Enable Backspace/Delete to remove selected nodes.
+				_.graph.node.setNodeDeletionHandler();
 
 				// For testing: add a node to the center of the graph
 				// await _.graph.node.add('Add Tag');
@@ -415,6 +428,48 @@ $(function () {
 				},
 				getSelectedNodes: () => {
 					return _.graph.data.nodes.filter(n => n.selected);
+				},
+				deleteNode: (node) => {
+					const nodeElement = _.graph.functions.validateNode(node);
+					if (!nodeElement || nodeElement.length === 0) return;
+
+					const nodeData = _.graph.data.nodes.find(n => n.element && n.element.is(nodeElement));
+					const nodeId = nodeData?.id || nodeElement.attr('id');
+					if (!nodeId) return;
+
+					// If we're mid-wire drag from/to this node, cancel first.
+					const drag = _.graph.data._connectionDrag;
+					if (drag?.active && (drag.from?.nodeId === nodeId)) {
+						_.graph.functions.cancelConnection();
+					}
+
+					// Remove any connections involving this node.
+					const connections = _.graph.data.connections || [];
+					if (connections.length > 0) {
+						const kept = [];
+						for (const conn of connections) {
+							const matches = conn?.from?.nodeId === nodeId || conn?.to?.nodeId === nodeId;
+							if (matches) {
+								try { conn.element?.remove?.(); } catch { /* ignore */ }
+							} else {
+								kept.push(conn);
+							}
+						}
+						_.graph.data.connections = kept;
+					}
+
+					// Remove node DOM.
+					try {
+						nodeElement.remove();
+					} catch {
+						// ignore
+					}
+
+					// Remove node from data.
+					_.graph.data.nodes = (_.graph.data.nodes || []).filter(n => n.id !== nodeId);
+
+					// Update wires/port state.
+					_.graph.functions.updateConnections?.();
 				},
 
 				// --- Port connections (cubic bezier wires) ------------------------------
@@ -1876,8 +1931,10 @@ $(function () {
 					let nodeData = await chip.render(null, node, { log: false, autoFit: false });
 					console.log(nodeData.object);
 					if (nodeData.html) {
-
-						nodeData.html = nodeData.html.replace('class="chip', 'id="node-' + _.graph.data.nodes.length + '" class="chip');
+						const idNum = Number.isFinite(Number(_.graph.data._nextNodeId)) ? Number(_.graph.data._nextNodeId) : (_.graph.data.nodes.length || 0);
+						_.graph.data._nextNodeId = idNum + 1;
+						const nodeId = 'node-' + idNum;
+						nodeData.html = nodeData.html.replace('class="chip', 'id="' + nodeId + '" class="chip');
 
 						// Give every port a unique id for connections to reference
 						const tempContainer = $('<div>' + nodeData.html + '</div>');
@@ -1915,10 +1972,10 @@ $(function () {
 						nodeData.html = tempContainer.html();
 
 						$(_.graph.data.elements.graphCanvas.element).append(nodeData.html);
-						const nodeElement = $(_.graph.data.elements.graphCanvas.element).find('#node-' + _.graph.data.nodes.length);
+						const nodeElement = $(_.graph.data.elements.graphCanvas.element).find('#' + nodeId);
 
 						const nodeObject = {
-							id: 'node-' + _.graph.data.nodes.length,
+							id: nodeId,
 							element: nodeElement,
 							selected: false,
 							object: nodeData.object
@@ -1943,9 +2000,46 @@ $(function () {
 						// Set up node selection handler
 						_.graph.node.setSelectHandler(nodeElement);
 
+						// Ensure the deletion handler is installed.
+						_.graph.node.setNodeDeletionHandler();
+
 					} else {
 						console.warn('Failed to render chip for node:', node);
 					}
+				},
+				setNodeDeletionHandler: () => {
+					if (_.graph.data._nodeDeletionHandlerInstalled) return;
+					_.graph.data._nodeDeletionHandlerInstalled = true;
+
+					const handler = (e) => {
+						// Don't interfere while dragging a connection.
+						if (_.graph.data._connectionDrag?.active) return;
+
+						const key = String(e.key || '');
+						if (key !== 'Backspace' && key !== 'Delete') return;
+
+						// Ignore while typing in inputs.
+						const ae = document.activeElement;
+						const tag = String(ae?.tagName || '').toLowerCase();
+						const isTyping = tag === 'input' || tag === 'textarea' || ae?.isContentEditable;
+						if (isTyping) return;
+
+						const selected = _.graph.functions.getSelectedNodes?.() || [];
+						if (selected.length === 0) return;
+
+						// Prevent browser back navigation / default delete behavior.
+						e.preventDefault();
+						e.stopPropagation();
+
+						// Copy list before mutating underlying arrays.
+						const toDelete = selected.map(n => n.id);
+						for (const nodeId of toDelete) {
+							_.graph.functions.deleteNode(nodeId);
+						}
+					};
+
+					window.addEventListener('keydown', handler, true);
+					_.graph.data._nodeDeletionHandler = handler;
 				},
 				setPosition: async (node, x, y) => {
 					let nodeElement = null;
