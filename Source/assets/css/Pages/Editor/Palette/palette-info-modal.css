@@ -1,0 +1,88 @@
+body.modal-open > *:not(.palette-info-modal) {
+  filter: blur(.125rem);
+}
+
+.palette-info-modal .modal-content {
+  border-radius: calc(var(--rr-border-radius) * 3);
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+}
+
+.palette-info-modal .modal-content .modal-header {
+  border-bottom: var(--rr-border-width) solid var(--rr-color-outline);
+  padding: .5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.palette-info-modal .modal-content .modal-header .chip-name {
+  font-family: 'Roboto';
+  line-height: 2rem;
+  font-size: 1.25rem;
+  margin: 0 0 0 .5rem;
+}
+
+.palette-info-modal .modal-content .modal-header .close {
+  font-family: 'Roboto';
+  font-size: 1.5rem;
+  aspect-ratio: 1/1;
+  padding: .5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.palette-info-modal .modal-content .modal-body {
+  padding: 1rem;
+}
+
+.palette-info-modal .modal-content .modal-body .chip-preview {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  background-color: var(--rr-color-gradient-light);
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+  border-radius: calc(var(--rr-border-radius) * 2);
+}
+
+.palette-info-modal .modal-content .modal-body .chip-preview .chip-preview-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  --minor: 25px;
+  --major: 100px;
+  --grid-x: 0px;
+  --grid-y: 0px;
+  background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.05) 0 1px, transparent 1px var(--minor)), repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 1px, transparent 1px var(--minor)), repeating-linear-gradient(0deg, rgba(255,255,255,0.10) 0 1px, transparent 1px var(--major)), repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0 1px, transparent 1px var(--major));
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.palette-info-modal .modal-content .modal-body .badges {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: .5rem;
+  flex-wrap: wrap;
+}
+
+.palette-info-modal .modal-content .modal-body .badges .r1, .palette-info-modal .modal-content .modal-body .badges .r2 {
+  background: linear-gradient(90deg, var(--rr-color-main-gradient-light), var(--rr-color-main-gradient-dark));
+}
+
+.palette-info-modal .modal-content .modal-body .badges .dev, .palette-info-modal .modal-content .modal-body .badges .troll, .palette-info-modal .modal-content .modal-body .badges .role {
+  background-color: var(--rr-color-danger);
+}
+
+.palette-info-modal .modal-content .modal-body .badges .beta {
+  background-color: var(--rr-color-orange);
+}
+
+.palette-info-modal .modal-content .modal-body .badges .studio {
+  background-color: var(--rr-color-generic);
+}
+

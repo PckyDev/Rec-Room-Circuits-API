@@ -72,7 +72,7 @@
   border-radius: var(--rr-border-radius);
 }
 
-.palette .body .row .col > div > div {
+.palette .body .row .col > div > .chip-render-preview {
   background-color: var(--rr-color-outline);
   border-radius: var(--rr-border-radius);
   aspect-ratio: 16/9;
@@ -98,5 +98,33 @@
 
 .palette .resizeBar:hover {
   cursor: col-resize;
+}
+
+.palette .body .row .col > div {
+  position: relative;
+}
+
+.palette .body .row .col > div > .buttons {
+  display: flex;
+  justify-content: end;
+  align-items: center;
+  gap: .25rem;
+  position: absolute;
+  width: calc(100% - 1rem);
+  padding: .125rem;
+  z-index: 999999999;
+}
+
+.palette .body .row .col > div > .buttons .rr-btn {
+  padding: .125rem;
+  aspect-ratio: 1/1;
+  height: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.palette .body .row .col > div > .buttons .rr-btn > * {
+  font-size: .75rem;
 }
 

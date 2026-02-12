@@ -73,6 +73,8 @@ $(function () {
 				searchInputId: 'paletteSearchInput',
 				paletteWindowId: 'paletteWindow',
 				paletteResizeBarId: 'paletteResizeBar',
+				paletteInfoModalId: 'paletteInfoModal',
+				chipOpenInfoModalBtnClass: 'openInfoModal'
 			},
 			init: async () => {
 				await _.palette.load.templates();
@@ -100,6 +102,46 @@ $(function () {
 						}
 					});
 					$('body').trigger('resize-chips');
+				},
+				openInfoModal: async (chipData) => {
+					const modal = $('#' + _.palette.data.paletteInfoModalId);
+
+					if (modal.length === 0) {
+						console.warn('Modal element with id "' + _.palette.data.paletteInfoModalId + '" not found.');
+						return;
+					}
+
+					// Set model content based on chipData
+					modal.find('.chip-name').text(chipData.paletteName || chipData.chipName || 'Unknown Chip');
+					modal.find('.chip-description').text(chipData.description || 'No description available.');
+
+					// Show/hide badges based on chipData properties
+					const badges = {
+						'r1': chipData.isValidInRoom1 || false,
+						'r2': chipData.isValidInRoom2 || false,
+						'dev': chipData.isDevChip || false,
+						'studio': chipData.isStudioChip || false,
+						'troll': chipData.isTrollingRisk || false,
+						'role': chipData.isRoleAssignmentRisk || false
+					}
+					$.each(badges, function (badgeClass, isVisible) {
+						const badgeElement = modal.find('.badges .' + badgeClass);
+						if (isVisible) {
+							badgeElement.show();
+						} else {
+							badgeElement.hide();
+						}
+					});
+
+					// Render chip preview in the modal
+					const previewContainer = modal.find('.chip-preview-viewport');
+					// Clear previous preview
+					previewContainer.empty();
+					// Render new preview
+					await chip.render(previewContainer, chipData, { size: 1, log: false, autoFit: true, enablePortHover: true });
+
+					// Open the modal using jQuery Bootstrap's modal method
+					modal.modal('show');
 				}
 			},
 			load: {
@@ -197,7 +239,16 @@ $(function () {
 						}
 
 						// Load click event for chips
-						chipElement.on('click', async function () {
+						chipElement.on('click', async function (e) {
+							// Prevent clicks on buttons inside the chip from triggering the node add.
+							if ($(e.target).closest('button').length > 0) {
+								// If the click was on the info button, open the info modal.
+								if ($(e.target).closest('button').hasClass(_.palette.data.chipOpenInfoModalBtnClass)) {
+									_.palette.functions.openInfoModal(chipData);
+								}
+								return;
+							}
+
 							// await chip.render($('#render'), chipData, { size: 1, log: true });
 							await _.graph.node.add(chipData);
 

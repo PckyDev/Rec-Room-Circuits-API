@@ -1,6 +1,10 @@
 html.light, html.dark {
   --rr-color-text-light: #eae8e4;
   --rr-color-text-dark: #3a3a40;
+  --rr-color-main-gradient-light: #d97028;
+  --rr-color-main-gradient-dark: #d93e27;
+  --rr-color-danger: #c34a45;
+  --rr-color-generic: #5b5959;
 }
 
 html.light {
