@@ -116,9 +116,11 @@ $(function () {
 					modal.find('.chip-description').text(chipData.description || 'No description available.');
 
 					// Show/hide badges based on chipData properties
-					const deprecated = false;
-					if (chipData.deprecationStage.name && chipData.deprecationStage.name !== 'Active') {
-						deprecated = true;
+					let deprecated = false;
+					if (chipData.deprecationStage) {
+						if (chipData.deprecationStage.name !== 'Active') {
+							deprecated = true;
+						}
 					}
 
 					const badges = {
