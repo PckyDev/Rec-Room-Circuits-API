@@ -42,7 +42,7 @@
   right: -.5rem;
 }
 
-.input .port.p-dictionary, .input .port.p-object, .input .port.p-bool.list, .input .port.p-float.list, .input .port.p-int.list, .input .port.p-quaternion.list, .input .port.p-string.list, .input .port.p-vector3.list, .input .port.p-player.list, .input .port.p-color.list, .input .port.p-any.list, .input .port.p-any, .input .port.connected {
+.input .port.p-dictionary, .input .port.p-object, .input .port.p-bool.list, .input .port.p-float.list, .input .port.p-int.list, .input .port.p-quaternion.list, .input .port.p-string.list, .input .port.p-vector3.list, .input .port.p-player.list, .input .port.p-color.list, .input .port.p-any.list, .input .port.p-any, .input .port.connected:not(.p-exec) {
   left: -.5rem;
 }
 
