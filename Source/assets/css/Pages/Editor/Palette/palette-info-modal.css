@@ -74,7 +74,7 @@ body.modal-open > *:not(.palette-info-modal) {
   background: linear-gradient(90deg, var(--rr-color-main-gradient-light), var(--rr-color-main-gradient-dark));
 }
 
-.palette-info-modal .modal-content .modal-body .badges .dev, .palette-info-modal .modal-content .modal-body .badges .troll, .palette-info-modal .modal-content .modal-body .badges .role {
+.palette-info-modal .modal-content .modal-body .badges .dev, .palette-info-modal .modal-content .modal-body .badges .troll, .palette-info-modal .modal-content .modal-body .badges .role, .palette-info-modal .modal-content .modal-body .badges .deprecated {
   background-color: var(--rr-color-danger);
 }
 

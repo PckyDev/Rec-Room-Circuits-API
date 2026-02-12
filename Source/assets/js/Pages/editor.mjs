@@ -116,13 +116,20 @@ $(function () {
 					modal.find('.chip-description').text(chipData.description || 'No description available.');
 
 					// Show/hide badges based on chipData properties
+					const deprecated = false;
+					if (chipData.deprecationStage.name && chipData.deprecationStage.name !== 'Active') {
+						deprecated = true;
+					}
+
 					const badges = {
 						'r1': chipData.isValidInRoom1 || false,
 						'r2': chipData.isValidInRoom2 || false,
 						'dev': chipData.isDevChip || false,
 						'studio': chipData.isStudioChip || false,
 						'troll': chipData.isTrollingRisk || false,
-						'role': chipData.isRoleAssignmentRisk || false
+						'role': chipData.isRoleAssignmentRisk || false,
+						'beta': chipData.isBetaChip || false,
+						'deprecated': deprecated
 					}
 					$.each(badges, function (badgeClass, isVisible) {
 						const badgeElement = modal.find('.badges .' + badgeClass);
