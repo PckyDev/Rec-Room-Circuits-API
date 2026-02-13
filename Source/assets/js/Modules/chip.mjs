@@ -315,9 +315,17 @@ export const chip = {
 			return;
 		}
 
+		const options = {
+			log: opt?.log || false,
+			size: opt?.size || 1,
+			autoFit: opt?.autoFit || true,
+			enablePortHover: opt?.enablePortHover || false,
+			chipsJSON: opt?.chipsJSON || null,
+		}
+
 		if (typeof chip == 'string') {
 			chip = chip.replace(/\s/gm, '');
-			await search(chip, { combineResults: true }).then(results => {
+			await search(chip, { combineResults: true, chipsJSON: options.chipsJSON }).then(results => {
 				if (Object.keys(results).length > 0) {
 					chip = results[Object.keys(results)[0]];
 				} else {
@@ -325,13 +333,6 @@ export const chip = {
 					return;
 				}
 			});
-		}
-
-		const options = {
-			log: opt?.log || false,
-			size: opt?.size || 1,
-			autoFit: opt?.autoFit || true,
-			enablePortHover: opt?.enablePortHover || false
 		}
 
 		const _ = {

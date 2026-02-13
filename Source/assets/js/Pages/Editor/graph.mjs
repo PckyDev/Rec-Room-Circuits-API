@@ -2376,6 +2376,7 @@ export const graph = {
             let nodeData = await chip.render(null, node, {
                 log: false,
                 autoFit: false,
+				chipsJSON: store.editor.chipsJSON,
             });
             console.log(nodeData.object);
             if (nodeData.html) {
