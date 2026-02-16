@@ -26,6 +26,7 @@ export const palette = {
         await palette.load.templates();
         await palette.load.chips();
         await palette.load.searchInput();
+		await palette.load.aboutChipEvent();
         // await palette.load.resizeBar();
         // await palette.load.openEvent();
     },
@@ -52,9 +53,7 @@ export const palette = {
 
             if (modal.length === 0) {
                 console.warn(
-                    'Modal element with id "' +
-                        store.palette.paletteInfoModalId +
-                        '" not found.',
+                    'Modal element with id "' + store.palette.paletteInfoModalId + '" not found.',
                 );
                 return;
             }
@@ -602,6 +601,20 @@ export const palette = {
             searchInput.on("input", function () {
                 const query = $(this).val().trim();
                 palette.load.chips(query);
+            });
+        },
+        aboutChipEvent: async () => {
+            if (store.palette._aboutChipEventInstalled) return;
+            store.palette._aboutChipEventInstalled = true;
+
+            $(document).on("graphAboutChip", async (e, info) => {
+                try {
+                    const chipData = info?.payload ?? null;
+                    if (!chipData) return;
+                    await palette.functions.openInfoModal(chipData);
+                } catch (err) {
+                    console.warn("AboutChip: failed to open modal", err);
+                }
             });
         },
         // resizeBar: async () => {

@@ -1,0 +1,51 @@
+.context-menu {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  padding: .25rem;
+  background-color: var(--rr-color-bg-secondary);
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+  border-radius: calc(var(--rr-border-radius) * 2);
+  box-shadow: 0 0 1rem 0 rgba(0,0,0,0.125);
+  display: flex;
+  flex-direction: column;
+  transition: opacity .1s;
+  opacity: 0;
+  z-index: 9999;
+}
+
+.context-menu.open {
+  transition: opacity .1s;
+  opacity: 1;
+}
+
+.context-menu .head {
+  display: flex;
+}
+
+.context-menu .head .rr-btn {
+  padding: .5rem;
+  font-size: .9rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.context-menu .head .rr-btn .undo, .context-menu .head .rr-btn .redo {
+  transform: rotateZ(-90deg);
+}
+
+.context-menu > .rr-btn {
+  display: flex;
+  justify-content: start;
+  padding: .5rem;
+  gap: .5rem;
+  font-size: .9rem;
+  font-weight: 400;
+}
+
+.context-menu > .rr-btn span {
+  padding-top: .1rem;
+}
+

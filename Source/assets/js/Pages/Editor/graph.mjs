@@ -19,11 +19,19 @@
 
 import { chip } from "../../Modules/chip.mjs";
 import { store } from "../../Pages/Editor/data.mjs";
+import { contextMenu } from "./contextMenu.mjs";
 
 export const graph = {
     init: async () => {
         // Load element references
         await graph.load.elements();
+
+        // Init context menu module (right-click + menu item events)
+        try {
+            await contextMenu.init?.();
+        } catch {
+            /* ignore */
+        }
 
         // Initialize interaction handlers
         $.each(
@@ -57,10 +65,162 @@ export const graph = {
         // Enable Ctrl/Cmd+Z and Ctrl/Cmd+Y (or Shift+Cmd+Z) for undo/redo.
         graph.node.setUndoRedoHandler();
 
+        // Wire context-menu integration (node right-click / long-press + actions).
+        graph.functions._bindContextMenuIntegration?.();
+
         // For testing: add a node to the center of the graph
         // await graph.node.add('Add Tag');
     },
     functions: {
+        _bindContextMenuIntegration: () => {
+            if (store.graph._contextMenuIntegrationInstalled) return;
+            store.graph._contextMenuIntegrationInstalled = true;
+
+            const setMenuStateForSelection = () => {
+                const items = contextMenu.getAllItems?.() || [];
+                for (const key of items) {
+                    contextMenu.setItemState?.(key, { hidden: true, disabled: true });
+                }
+
+                const h = store.graph._history || { undo: [], redo: [] };
+                const canUndo = Array.isArray(h.undo) && h.undo.length > 0;
+                const canRedo = Array.isArray(h.redo) && h.redo.length > 0;
+                contextMenu.setItemState?.("undo", { hidden: false, disabled: !canUndo });
+                contextMenu.setItemState?.("redo", { hidden: false, disabled: !canRedo });
+
+                const selected = graph.functions.getSelectedNodes?.() || [];
+                const hasSelection = selected.length > 0;
+                const singleSelection = selected.length === 1;
+                contextMenu.setItemState?.("duplicate", {
+                    hidden: !hasSelection,
+                    disabled: !hasSelection,
+                });
+                contextMenu.setItemState?.("delete", {
+                    hidden: !hasSelection,
+                    disabled: !hasSelection,
+                });
+
+                // Contextual items
+                contextMenu.setItemState?.("createInvention", {
+                    hidden: !hasSelection,
+                    disabled: !hasSelection,
+                });
+                contextMenu.setItemState?.("aboutChip", {
+                    hidden: !singleSelection,
+                    disabled: !singleSelection,
+                });
+            };
+
+            const ensureNodeSelectedForEventTarget = (target) => {
+                const nodeEl = target?.closest?.(".chip") || null;
+                const nodeId = String(nodeEl?.id || "");
+                if (!nodeEl || !nodeId.startsWith("node-")) return;
+
+                const nodeData = (store.graph.nodes || []).find((n) => n?.id === nodeId);
+                const alreadySelected = !!nodeData?.selected;
+                if (alreadySelected) return;
+
+                // Right-clicking an unselected node should make it the active selection.
+                for (const n of store.graph.nodes || []) {
+                    if (n?.selected) graph.functions.deselectNode(n.element);
+                }
+                graph.functions.selectNode(nodeId);
+            };
+
+            // Unify menu state updates for ANY open (desktop right click + mobile long press).
+            // contextMenu.mjs emits this right before it applies states + shows.
+            $(document).on("contextMenuBeforeOpen", (ev, info) => {
+                try {
+                    ensureNodeSelectedForEventTarget(info?.meta?.target);
+                    setMenuStateForSelection();
+                } catch {
+                    /* ignore */
+                }
+            });
+
+            // Desktop: before the contextMenu module opens (it listens in bubble phase),
+            // update selection and set item states in capture phase.
+            document.addEventListener(
+                "contextmenu",
+                (e) => {
+                    try {
+                        ensureNodeSelectedForEventTarget(e.target);
+                        setMenuStateForSelection();
+                    } catch {
+                        /* ignore */
+                    }
+                },
+                true,
+            );
+
+            // Context menu item events
+            $(document).on("contextUndo", () => {
+                Promise.resolve(graph.functions.undo?.()).catch(() => {
+                    /* ignore */
+                });
+            });
+            $(document).on("contextRedo", () => {
+                Promise.resolve(graph.functions.redo?.()).catch(() => {
+                    /* ignore */
+                });
+            });
+            $(document).on("contextDelete", () => {
+                const selected = graph.functions.getSelectedNodes?.() || [];
+                if (selected.length === 0) return;
+                const ids = selected.map((n) => n.id);
+                graph.functions._historyBeginBatch?.();
+                try {
+                    for (const id of ids) graph.functions.deleteNode(id);
+                } finally {
+                    graph.functions._historyEndBatch?.();
+                }
+            });
+            $(document).on("contextDuplicate", () => {
+                Promise.resolve(graph.node.duplicateSelectedNodes?.()).catch(() => {
+                    /* ignore */
+                });
+            });
+
+            // Optional/forwarded context actions (handled elsewhere in the app)
+            $(document).on("contextCreateInvention", () => {
+                const selected = graph.functions.getSelectedNodes?.() || [];
+                const payload = {
+                    selectedIds: selected.map((n) => n.id),
+                    selectedNodes: selected.map((n) => ({
+                        id: n.id,
+                        payload: n.object ?? null,
+                    })),
+                };
+
+                // If a concrete graph action exists, prefer it; otherwise forward an event.
+                if (typeof graph.functions.createInventionFromSelection === "function") {
+                    try {
+                        graph.functions.createInventionFromSelection(payload);
+                    } catch {
+                        /* ignore */
+                    }
+                } else {
+                    $(document).trigger("graphCreateInvention", [payload]);
+                }
+            });
+
+            $(document).on("contextAboutChip", () => {
+                const selected = graph.functions.getSelectedNodes?.() || [];
+                if (selected.length !== 1) return;
+                const n = selected[0];
+                const payload = { id: n.id, payload: n.object ?? null };
+
+                if (typeof graph.functions.openAboutChip === "function") {
+                    try {
+                        graph.functions.openAboutChip(payload);
+                    } catch {
+                        /* ignore */
+                    }
+                } else {
+                    $(document).trigger("graphAboutChip", [payload]);
+                }
+            });
+        },
         _captureGraphSnapshot: () => {
             const camera = store.graph.cameraState || {};
             const nodes = (store.graph.nodes || []).map((n) => {
@@ -2629,6 +2789,91 @@ export const graph = {
                     graph.functions.updateConnections?.();
                     return true;
                 })();
+            } finally {
+                if (h) graph.functions._historyEndBatch?.();
+            }
+        },
+        duplicateSelectedNodes: async () => {
+            const h = store.graph._history;
+            try {
+                const selected = graph.functions.getSelectedNodes?.() || [];
+                if (selected.length === 0) return false;
+
+                let minX = Infinity;
+                let minY = Infinity;
+                const nodes = [];
+                for (const n of selected) {
+                    const leftRaw = n?.element?.css?.("left");
+                    const topRaw = n?.element?.css?.("top");
+                    const x = Number.parseFloat(String(leftRaw || "0")) || 0;
+                    const y = Number.parseFloat(String(topRaw || "0")) || 0;
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    nodes.push({ oldId: n.id, payload: n.object ?? null, x, y });
+                }
+
+                const selectedSet = new Set(selected.map((n) => n.id));
+                const connections = (store.graph.connections || [])
+                    .filter(
+                        (c) =>
+                            selectedSet.has(c?.from?.nodeId) &&
+                            selectedSet.has(c?.to?.nodeId),
+                    )
+                    .map((c) => ({
+                        fromNodeId: c.from.nodeId,
+                        fromPortId: c.from.portId,
+                        toNodeId: c.to.nodeId,
+                        toPortId: c.to.portId,
+                    }));
+
+                graph.functions._historyBeginBatch?.();
+                // Single undo step for whole duplicate operation.
+                graph.functions._recordHistory?.();
+
+                // Offset duplicates slightly so they don't overlap.
+                const serial = Number(store.graph._duplicateSerial || 0) + 1;
+                store.graph._duplicateSerial = serial;
+                const delta = 20 * serial;
+                const baseX = minX + delta;
+                const baseY = minY + delta;
+
+                // Deselect existing nodes; new duplicates become selection.
+                for (const n of store.graph.nodes || []) {
+                    if (n?.selected) graph.functions.deselectNode(n.element);
+                }
+
+                const idMap = new Map();
+                const newIds = [];
+                for (const n of nodes) {
+                    const relX = (Number(n.x) || 0) - minX;
+                    const relY = (Number(n.y) || 0) - minY;
+                    const payload = n.payload ?? null;
+                    const addArg = payload?.chipName ? payload.chipName : payload;
+                    const created = await graph.node.add(addArg, { skipHistory: true });
+                    if (!created?.id) continue;
+                    idMap.set(n.oldId, created.id);
+                    newIds.push(created.id);
+                    await graph.node.setPosition(created.id, baseX + relX, baseY + relY);
+                }
+
+                for (const c of connections) {
+                    const fromNodeId = idMap.get(c.fromNodeId);
+                    const toNodeId = idMap.get(c.toNodeId);
+                    if (!fromNodeId || !toNodeId) continue;
+                    graph.functions.addConnection?.(
+                        fromNodeId,
+                        c.fromPortId,
+                        toNodeId,
+                        c.toPortId,
+                        { skipHistory: true },
+                    );
+                }
+
+                for (const id of newIds) {
+                    graph.functions.selectNode(id);
+                }
+                graph.functions.updateConnections?.();
+                return true;
             } finally {
                 if (h) graph.functions._historyEndBatch?.();
             }

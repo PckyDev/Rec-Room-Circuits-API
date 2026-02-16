@@ -6,6 +6,9 @@ import { graph } from '../../Pages/Editor/graph.mjs';
 import { store } from '../../Pages/Editor/data.mjs';
 import { leftNav } from '../../Pages/Editor/leftNav.mjs';
 import { account } from '../../Pages/Editor/account.mjs';
+import { contextMenu } from '../../Pages/Editor/contextMenu.mjs';
+
+////////////////////////////////////////////////////////
 
 $(function () {
 	const _ = {
@@ -20,6 +23,7 @@ $(function () {
 			await palette.init();
 			await graph.init();
 			await auth.init();
+			await contextMenu.init();
 			// await auth.start();
 		}
 	}

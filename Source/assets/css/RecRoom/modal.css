@@ -1,4 +1,5 @@
 .rr-modal {
+  z-index: 99999;
 }
 
 body.modal-open > *:not(.rr-modal) {
