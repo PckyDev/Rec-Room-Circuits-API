@@ -2,7 +2,7 @@
   position: relative;
 }
 
-.rr-text-input input {
+.rr-text-input input, .rr-text-input textarea {
   font-family: 'Roboto';
   display: block;
   width: 100%;
@@ -20,11 +20,11 @@
   border-radius: calc(var(--rr-border-radius) * 1.5);
 }
 
-.rr-text-input input:focus {
+.rr-text-input input:focus, .rr-text-input textarea:focus {
   outline: 0;
 }
 
-.rr-text-input input::placeholder {
+.rr-text-input input::placeholder, .rr-text-input textarea::placeholder {
   color: var(--rr-color-text-tertiary);
   opacity: 1;
 }

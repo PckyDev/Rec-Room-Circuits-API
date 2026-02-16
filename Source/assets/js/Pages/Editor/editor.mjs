@@ -7,6 +7,7 @@ import { store } from '../../Pages/Editor/data.mjs';
 import { leftNav } from '../../Pages/Editor/leftNav.mjs';
 import { account } from '../../Pages/Editor/account.mjs';
 import { contextMenu } from '../../Pages/Editor/contextMenu.mjs';
+import { inventions } from '../../Pages/Editor/inventions.mjs';
 
 ////////////////////////////////////////////////////////
 
@@ -24,6 +25,7 @@ $(function () {
 			await graph.init();
 			await auth.init();
 			await contextMenu.init();
+			await inventions.init();
 			// await auth.start();
 		}
 	}

@@ -109,6 +109,11 @@ export const graph = {
                     hidden: !singleSelection,
                     disabled: !singleSelection,
                 });
+
+                contextMenu.setItemState?.("exportImage", {
+                    hidden: !hasSelection,
+                    disabled: !hasSelection,
+                });
             };
 
             const ensureNodeSelectedForEventTarget = (target) => {
@@ -219,6 +224,67 @@ export const graph = {
                 } else {
                     $(document).trigger("graphAboutChip", [payload]);
                 }
+            });
+
+            $(document).on("contextExportImage", () => {
+                // Export can be expensive; avoid double-trigger.
+                if (store.graph._exportImageInProgress) return;
+                store.graph._exportImageInProgress = true;
+
+                const run = async () => {
+                    const selected = graph.functions.getSelectedNodes?.() || [];
+                    if (selected.length === 0) return;
+
+                    const dataUrl = await graph.export.selectedNodesAsImage?.();
+                    if (!dataUrl || typeof dataUrl !== "string") return;
+
+                    const ts = new Date()
+                        .toISOString()
+                        .replace(/[:.]/g, "-")
+                        .replace(/Z$/, "Z");
+                    const filename = `graph-selection-${ts}.png`;
+
+                    let href = dataUrl;
+                    let objectUrl = null;
+                    try {
+                        // Prefer Blob URLs to avoid huge data URLs in the download flow.
+                        const res = await fetch(dataUrl);
+                        const blob = await res.blob();
+                        objectUrl = URL.createObjectURL(blob);
+                        href = objectUrl;
+                    } catch {
+                        // Fallback: keep data URL.
+                    }
+
+                    const a = document.createElement("a");
+                    a.href = href;
+                    a.download = filename;
+                    a.rel = "noopener";
+                    a.style.position = "fixed";
+                    a.style.left = "-9999px";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+
+                    if (objectUrl) {
+                        // Revoke after the click has been processed.
+                        setTimeout(() => {
+                            try {
+                                URL.revokeObjectURL(objectUrl);
+                            } catch {
+                                /* ignore */
+                            }
+                        }, 1000);
+                    }
+                };
+
+                Promise.resolve(run())
+                    .catch((e) => {
+                        console.warn("Export Image failed:", e);
+                    })
+                    .finally(() => {
+                        store.graph._exportImageInProgress = false;
+                    });
             });
         },
         _captureGraphSnapshot: () => {
@@ -3495,4 +3561,780 @@ export const graph = {
             });
         },
     },
+	export: {
+        selectedNodesAsImage: async (options = null) => {
+            // Export selected nodes as an image (PNG). Returns a data URL of the image.
+            const opts = {
+                // captureMode:
+                //  - "viewport" (default): capture the real viewport DOM and crop to selection (best fidelity)
+                //  - "clone": offscreen clone of selected nodes (faster sometimes, but can lose CSS context)
+                captureMode: "viewport",
+                // If true (default), temporarily hide non-selected nodes/wires during capture.
+                hideUnselected: true,
+                // html2canvas fidelity knobs:
+                // - foreignObjectRendering delegates more to the browser and often preserves modern CSS
+                //   (clip-path, gradients, advanced colors) better than the default renderer.
+                //   It can be slower and may behave differently if cross-origin images are involved.
+                useForeignObjectRendering: true,
+                // Optional passthrough for advanced cases.
+                // Example: { foreignObjectRendering: true, imageTimeout: 0 }
+                html2canvasOptions: null,
+                // The graph viewport typically has a CSS background grid. When capturing the real viewport,
+                // that grid will appear in the exported image unless we temporarily disable it.
+                // Default: hide it so backgroundColor/transparent export looks correct.
+                hideViewportGrid: true,
+                // If true (default), temporarily suppress selected-node outlines during capture.
+                hideSelectionOutline: true,
+                padding: 150,
+                backgroundColor: null, // null => transparent for html2canvas
+                autoLoadHtml2Canvas: true,
+                html2canvasCdnUrl:
+                    "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
+                // Exporting at full devicePixelRatio can be expensive. Default to 1 for responsiveness.
+                pixelRatio: 1,
+                    includeWires: true,
+                    wireStrokeWidth: 5,
+                    wireOpacity: 0.9,
+                // Yield periodically so the UI can repaint (does not fully background DOM rendering).
+                yieldDuringBuild: true,
+                yieldEvery: 4,
+                // If true, waits until the browser is idle before rasterizing (best-effort).
+                runWhenIdle: true,
+                idleTimeoutMs: 250,
+                ...((options && typeof options === "object") ? options : {}),
+            };
+
+            const selected = graph.functions.getSelectedNodes?.() || [];
+            if (!Array.isArray(selected) || selected.length === 0) return null;
+            const selectedIdSet = new Set(selected.map((n) => String(n?.id ?? "")));
+
+            // Prefer stable ordering (DOM/store order) so the export matches what the user sees.
+            const idToIndex = new Map();
+            for (let i = 0; i < (store.graph.nodes || []).length; i++) {
+                const n = store.graph.nodes[i];
+                if (n?.id) idToIndex.set(String(n.id), i);
+            }
+            selected.sort((a, b) => {
+                const ai = idToIndex.has(a?.id) ? idToIndex.get(a.id) : 0;
+                const bi = idToIndex.has(b?.id) ? idToIndex.get(b.id) : 0;
+                return Number(ai) - Number(bi);
+            });
+
+            // Compute a bounding box in WORLD coordinates (node CSS left/top are world coords).
+            let minX = Infinity;
+            let minY = Infinity;
+            let maxX = -Infinity;
+            let maxY = -Infinity;
+
+            for (const n of selected) {
+                const el = n?.element;
+                const dom = el && el.length ? el[0] : null;
+                if (!dom) continue;
+
+                const leftRaw = el.css("left");
+                const topRaw = el.css("top");
+                const x = Number.parseFloat(String(leftRaw || "0")) || 0;
+                const y = Number.parseFloat(String(topRaw || "0")) || 0;
+
+                // offsetWidth/offsetHeight are not affected by CSS transforms on ancestors.
+                const w = Number(dom.offsetWidth) || 0;
+                const h = Number(dom.offsetHeight) || 0;
+
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + w);
+                maxY = Math.max(maxY, y + h);
+            }
+
+            if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+
+            const pad = Math.max(0, Number(opts.padding) || 0);
+            const outW = Math.max(1, Math.ceil(maxX - minX + pad * 2));
+            const outH = Math.max(1, Math.ceil(maxY - minY + pad * 2));
+
+            // Ensure fonts are loaded before rasterizing (helps avoid fallback font flashes).
+            try {
+                if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            } catch {
+                /* ignore */
+            }
+
+            const yieldToBrowser = async () => {
+                // Let the browser repaint (so spinners/overlays can show).
+                await new Promise((resolve) =>
+                    requestAnimationFrame(() => setTimeout(resolve, 0)),
+                );
+            };
+
+            const runInIdleTime = async () => {
+                if (!opts.runWhenIdle) return;
+                if (typeof window.requestIdleCallback !== "function") {
+                    await yieldToBrowser();
+                    return;
+                }
+                await new Promise((resolve) =>
+                    window.requestIdleCallback(resolve, {
+                        timeout: Math.max(0, Number(opts.idleTimeoutMs) || 0),
+                    }),
+                );
+            };
+
+            const ensureHtml2Canvas = async () => {
+                if (typeof window.html2canvas === "function") return true;
+                if (!opts.autoLoadHtml2Canvas) return false;
+                const url = String(opts.html2canvasCdnUrl || "").trim();
+                if (!url) return false;
+
+                // Cache the load promise so concurrent calls don't inject multiple scripts.
+                if (!store.graph._html2canvasLoadPromise) {
+                    store.graph._html2canvasLoadPromise = new Promise(
+                        (resolve, reject) => {
+                            try {
+                                const s = document.createElement("script");
+                                s.async = true;
+                                s.src = url;
+                                s.onload = () => resolve(true);
+                                s.onerror = () =>
+                                    reject(
+                                        new Error(
+                                            "Failed to load html2canvas from CDN",
+                                        ),
+                                    );
+                                document.head.appendChild(s);
+                            } catch (err) {
+                                reject(err);
+                            }
+                        },
+                    );
+                }
+
+                try {
+                    await store.graph._html2canvasLoadPromise;
+                } catch (e) {
+                    console.warn(
+                        "Could not lazy-load html2canvas (CDN blocked or failed):",
+                        e,
+                    );
+                    return false;
+                }
+                return typeof window.html2canvas === "function";
+            };
+
+            const resolveCssColorForCanvas = (value, referenceEl) => {
+                if (value == null) return null;
+                const raw = String(value).trim();
+                if (!raw) return null;
+
+                // Canvas APIs can't resolve CSS variables like `var(--x)`.
+                // Resolve by asking the browser for computed style in the right variable scope.
+                let probe = null;
+                try {
+                    probe = document.createElement("span");
+                    probe.style.position = "fixed";
+                    probe.style.left = "-9999px";
+                    probe.style.top = "0";
+                    probe.style.width = "0";
+                    probe.style.height = "0";
+                    probe.style.pointerEvents = "none";
+                    probe.style.color = raw;
+
+                    const parent =
+                        referenceEl ||
+                        store.graph.elements?.graphCanvasViewport?.element ||
+                        document.body ||
+                        document.documentElement;
+                    parent.appendChild(probe);
+                    const computed = window.getComputedStyle(probe).color;
+                    if (computed && computed !== "" && computed !== "transparent") {
+                        return computed;
+                    }
+                } catch {
+                    /* ignore */
+                } finally {
+                    try {
+                        probe?.remove?.();
+                    } catch {
+                        /* ignore */
+                    }
+                }
+
+                return raw;
+            };
+
+            const captureMode = String(opts.captureMode || "viewport")
+                .trim()
+                .toLowerCase();
+
+            // High-fidelity path: capture the actual viewport (keeps exact CSS + wire placement), then crop.
+            if (captureMode !== "clone") {
+                const vpEl = store.graph.elements.graphCanvasViewport?.element;
+                if (!vpEl) return null;
+
+                // Ensure wires are up-to-date before capturing.
+                try {
+                    graph.functions.updateConnections?.();
+                } catch {
+                    /* ignore */
+                }
+
+                // Compute selection bounds in VIEWPORT coordinates.
+                const vpRect = vpEl.getBoundingClientRect();
+                let minVpX = Infinity;
+                let minVpY = Infinity;
+                let maxVpX = -Infinity;
+                let maxVpY = -Infinity;
+
+                for (const n of selected) {
+                    const dom = n?.element && n.element.length ? n.element[0] : null;
+                    if (!dom) continue;
+                    const r = dom.getBoundingClientRect();
+                    const x0 = r.left - vpRect.left;
+                    const y0 = r.top - vpRect.top;
+                    const x1 = r.right - vpRect.left;
+                    const y1 = r.bottom - vpRect.top;
+                    minVpX = Math.min(minVpX, x0);
+                    minVpY = Math.min(minVpY, y0);
+                    maxVpX = Math.max(maxVpX, x1);
+                    maxVpY = Math.max(maxVpY, y1);
+                }
+
+                // Expand bounds to include selected->selected wires (beziers can bow outside node boxes).
+                if (opts.includeWires) {
+                    const strokeW = (() => {
+                        try {
+                            return Number(graph.functions._getWireStrokeWidth?.()) || 5;
+                        } catch {
+                            return 5;
+                        }
+                    })();
+                    const extra = Math.max(8, strokeW * 2 + 8);
+
+                    for (const conn of store.graph.connections || []) {
+                        const fromNodeId = String(conn?.from?.nodeId ?? "");
+                        const toNodeId = String(conn?.to?.nodeId ?? "");
+                        if (!selectedIdSet.has(fromNodeId) || !selectedIdSet.has(toNodeId))
+                            continue;
+
+                        const fromPortEl = graph.functions._findPortEl(
+                            conn.from.nodeId,
+                            conn.from.portId,
+                        );
+                        const toPortEl = graph.functions._findPortEl(
+                            conn.to.nodeId,
+                            conn.to.portId,
+                        );
+                        if (!fromPortEl || !toPortEl) continue;
+
+                        const p0 = graph.functions._getPortPointInViewport(fromPortEl);
+                        const p1 = graph.functions._getPortPointInViewport(toPortEl);
+                        if (!p0 || !p1) continue;
+
+                        const fromRole = graph.functions._getPortRole(fromPortEl);
+                        const toRole = graph.functions._getPortRole(toPortEl);
+                        const side0 = fromRole === "input" ? -1 : 1;
+                        const side1 = toRole === "input" ? -1 : 1;
+
+                        const dx = Math.abs(p1.x - p0.x);
+                        const c = Math.max(60, dx * 0.5);
+                        const c1 = { x: p0.x + c * side0, y: p0.y };
+                        const c2 = { x: p1.x + c * side1, y: p1.y };
+
+                        for (const pt of [p0, p1, c1, c2]) {
+                            minVpX = Math.min(minVpX, pt.x - extra);
+                            minVpY = Math.min(minVpY, pt.y - extra);
+                            maxVpX = Math.max(maxVpX, pt.x + extra);
+                            maxVpY = Math.max(maxVpY, pt.y + extra);
+                        }
+                    }
+                }
+
+                if (!Number.isFinite(minVpX) || !Number.isFinite(minVpY)) return null;
+
+                const padVp = Math.max(0, Number(opts.padding) || 0);
+                let cropX = Math.floor(minVpX - padVp);
+                let cropY = Math.floor(minVpY - padVp);
+                let cropW = Math.ceil(maxVpX - minVpX + padVp * 2);
+                let cropH = Math.ceil(maxVpY - minVpY + padVp * 2);
+
+                // Clamp to the viewport bounds.
+                const vpW = Math.max(1, Math.round(vpRect.width));
+                const vpH = Math.max(1, Math.round(vpRect.height));
+                if (cropX < 0) {
+                    cropW += cropX;
+                    cropX = 0;
+                }
+                if (cropY < 0) {
+                    cropH += cropY;
+                    cropY = 0;
+                }
+                cropW = Math.max(1, Math.min(cropW, vpW - cropX));
+                cropH = Math.max(1, Math.min(cropH, vpH - cropY));
+
+                const ratio = Math.max(1, Number(opts.pixelRatio) || 1);
+                const bg = resolveCssColorForCanvas(opts.backgroundColor, vpEl);
+                const extraH2cOpts =
+                    opts.html2canvasOptions && typeof opts.html2canvasOptions === "object"
+                        ? opts.html2canvasOptions
+                        : null;
+
+                const shouldHide = opts.hideUnselected !== false;
+                const restores = [];
+                const remember = (el) => {
+                    if (!el || !el.style) return;
+                    restores.push({ el, v: el.style.visibility, d: el.style.display });
+                };
+
+                const outlineRestores = [];
+                const rememberOutline = (el) => {
+                    if (!el || !el.style) return;
+                    outlineRestores.push({
+                        el,
+                        v: el.style.getPropertyValue("outline"),
+                        p: el.style.getPropertyPriority("outline"),
+                    });
+                };
+
+                // If exports overlap (double-trigger, multiple calls, etc.), a naïve save/restore can
+                // permanently disable the grid because the nested call "saves" the already-disabled state.
+                // Use a depth-counted override so only the outermost call modifies/restores the viewport.
+                const acquireViewportGridHide = (el) => {
+                    if (!el || !el.style) return () => {};
+
+                    const props = [
+                        "background",
+                        "background-image",
+                        "background-color",
+                        "background-repeat",
+                        "background-size",
+                        "background-position",
+                    ];
+
+                    const stateKey = "_exportViewportGridHide";
+                    const state = store.graph[stateKey] || { depth: 0, prev: null, pri: null, props };
+                    store.graph[stateKey] = state;
+
+                    state.depth = Number(state.depth || 0) + 1;
+
+                    if (state.depth === 1) {
+                        const prev = {};
+                        const pri = {};
+                        for (const p of props) {
+                            prev[p] = el.style.getPropertyValue(p);
+                            pri[p] = el.style.getPropertyPriority(p);
+                        }
+                        state.prev = prev;
+                        state.pri = pri;
+
+                        // Set longhands; avoid the shorthand `background` since it can clobber longhands.
+                        el.style.setProperty("background-image", "none");
+                        el.style.setProperty("background-repeat", "no-repeat");
+                        el.style.setProperty("background-position", "0 0");
+                        el.style.setProperty("background-size", "auto");
+                        el.style.setProperty("background-color", "transparent");
+                    }
+
+                    return () => {
+                        const s = store.graph[stateKey];
+                        if (!s) return;
+                        s.depth = Number(s.depth || 0) - 1;
+                        if (s.depth > 0) return;
+
+                        try {
+                            const prev = s.prev || {};
+                            const pri = s.pri || {};
+                            const restoreProps = s.props || props;
+                            for (const p of restoreProps) {
+                                const v = prev[p];
+                                const pr = pri[p] || "";
+                                if (v == null || String(v).trim() === "") {
+                                    el.style.removeProperty(p);
+                                } else {
+                                    el.style.setProperty(p, v, pr);
+                                }
+                            }
+                        } catch {
+                            /* ignore */
+                        } finally {
+                            try {
+                                delete store.graph[stateKey];
+                            } catch {
+                                /* ignore */
+                            }
+                        }
+                    };
+                };
+
+                let releaseViewportGridHide = null;
+
+                try {
+                    if (shouldHide) {
+                        // Hide non-selected nodes.
+                        for (const node of store.graph.nodes || []) {
+                            const id = String(node?.id ?? "");
+                            const dom = node?.element && node.element.length ? node.element[0] : null;
+                            if (!dom) continue;
+                            if (selectedIdSet.has(id)) continue;
+                            remember(dom);
+                            dom.style.visibility = "hidden";
+                        }
+
+                        // Hide wires not fully inside selection (and hide temp drag wire).
+                        const layer = store.graph._wireLayer;
+                        if (layer?.tempPath) {
+                            remember(layer.tempPath);
+                            layer.tempPath.style.display = "none";
+                        }
+                        for (const conn of store.graph.connections || []) {
+                            const pathEl = conn?.element;
+                            if (!pathEl) continue;
+                            const fromNodeId = String(conn?.from?.nodeId ?? "");
+                            const toNodeId = String(conn?.to?.nodeId ?? "");
+                            const keep =
+                                !!opts.includeWires &&
+                                selectedIdSet.has(fromNodeId) &&
+                                selectedIdSet.has(toNodeId);
+                            if (keep) continue;
+                            remember(pathEl);
+                            pathEl.style.visibility = "hidden";
+                        }
+                    }
+
+                    // Hide the viewport background grid so exports can use a clean background.
+                    // Use depth-counted override to guarantee restoration even if exports overlap.
+                    if (opts.hideViewportGrid !== false) {
+                        releaseViewportGridHide = acquireViewportGridHide(vpEl);
+                    }
+
+                    // Suppress selection outline so exports look like "normal" nodes.
+                    if (opts.hideSelectionOutline !== false) {
+                        for (const n of selected) {
+                            const dom = n?.element && n.element.length ? n.element[0] : null;
+                            if (!dom) continue;
+                            rememberOutline(dom);
+                            dom.style.setProperty("outline", "none", "important");
+                        }
+                    }
+
+                    // Let styles apply and allow a paint before rasterization.
+                    await yieldToBrowser();
+                    await runInIdleTime();
+
+                    if (typeof window.html2canvas !== "function") {
+                        await ensureHtml2Canvas();
+                    }
+                    if (typeof window.html2canvas !== "function") {
+                        console.warn(
+                            "selectedNodesAsImage requires html2canvas (preferred) or dom-to-image to be loaded.",
+                        );
+                        return null;
+                    }
+
+                    await yieldToBrowser();
+                    const fullCanvas = await window.html2canvas(vpEl, {
+                        // Avoid relying on html2canvas backgroundColor (especially with foreignObjectRendering);
+                        // we paint the final background deterministically on the output canvas.
+                        backgroundColor: null,
+                        scale: ratio,
+                        useCORS: true,
+                        allowTaint: true,
+                        logging: false,
+                        foreignObjectRendering: opts.useForeignObjectRendering !== false,
+                        ...(extraH2cOpts || null),
+                    });
+
+                    const outCanvas = document.createElement("canvas");
+                    outCanvas.width = Math.max(1, Math.round(cropW * ratio));
+                    outCanvas.height = Math.max(1, Math.round(cropH * ratio));
+                    const ctx = outCanvas.getContext("2d");
+                    if (!ctx) return null;
+
+                    // Make backgroundColor deterministic (html2canvas backgroundColor is not always reliable
+                    // across rendering modes / browser quirks).
+                    if (bg != null && String(bg).trim().toLowerCase() !== "transparent") {
+                        ctx.fillStyle = bg;
+                        ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+                    }
+
+                    ctx.drawImage(
+                        fullCanvas,
+                        Math.round(cropX * ratio),
+                        Math.round(cropY * ratio),
+                        Math.round(cropW * ratio),
+                        Math.round(cropH * ratio),
+                        0,
+                        0,
+                        Math.round(cropW * ratio),
+                        Math.round(cropH * ratio),
+                    );
+
+                    return outCanvas.toDataURL("image/png");
+                } finally {
+                    // Restore visibility/display.
+                    for (let i = restores.length - 1; i >= 0; i--) {
+                        const r = restores[i];
+                        try {
+                            r.el.style.visibility = r.v;
+                            r.el.style.display = r.d;
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+
+                    // Restore selection outlines.
+                    for (let i = outlineRestores.length - 1; i >= 0; i--) {
+                        const r = outlineRestores[i];
+                        try {
+                            const prev = r.v;
+                            if (prev == null || String(prev).trim() === "") {
+                                r.el.style.removeProperty("outline");
+                            } else {
+                                r.el.style.setProperty("outline", prev, r.p || "");
+                            }
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+
+                    // Restore any viewport grid overrides.
+                    try {
+                        releaseViewportGridHide?.();
+                    } catch {
+                        /* ignore */
+                    }
+                }
+            }
+
+            // Build an offscreen render surface.
+            const root = document.createElement("div");
+            root.className = "graph-export-root";
+            root.style.position = "fixed";
+            root.style.left = "-9999px";
+            root.style.top = "0";
+            root.style.width = outW + "px";
+            root.style.height = outH + "px";
+            root.style.overflow = "hidden";
+            root.style.pointerEvents = "none";
+            root.style.contain = "layout style paint";
+
+            // NOTE: backgroundColor null => transparent for html2canvas; for dom-to-image we translate later.
+            if (opts.backgroundColor != null) {
+                root.style.background = String(opts.backgroundColor);
+            }
+
+            document.body.appendChild(root);
+
+            try {
+                // Optionally render wires that connect selected nodes.
+                if (opts.includeWires) {
+                    const svgNS = "http://www.w3.org/2000/svg";
+                    const svg = document.createElementNS(svgNS, "svg");
+                    svg.setAttribute("width", String(outW));
+                    svg.setAttribute("height", String(outH));
+                    svg.setAttribute("viewBox", `0 0 ${outW} ${outH}`);
+                    svg.style.position = "absolute";
+                    svg.style.left = "0";
+                    svg.style.top = "0";
+                    svg.style.pointerEvents = "none";
+                    svg.style.overflow = "visible";
+                    svg.style.zIndex = "0";
+                    root.appendChild(svg);
+
+                    const g = document.createElementNS(svgNS, "g");
+                    svg.appendChild(g);
+
+                    const baseWireWidth = Math.max(
+                        1,
+                        Math.min(10, Number(opts.wireStrokeWidth) || 5),
+                    );
+                    const opacity = Math.max(
+                        0,
+                        Math.min(1, Number(opts.wireOpacity) || 0.9),
+                    );
+
+                    for (const conn of store.graph.connections || []) {
+                        const fromNodeId = String(conn?.from?.nodeId ?? "");
+                        const toNodeId = String(conn?.to?.nodeId ?? "");
+                        if (!selectedIdSet.has(fromNodeId) || !selectedIdSet.has(toNodeId))
+                            continue;
+
+                        const fromPortEl = graph.functions._findPortEl(
+                            conn.from.nodeId,
+                            conn.from.portId,
+                        );
+                        const toPortEl = graph.functions._findPortEl(
+                            conn.to.nodeId,
+                            conn.to.portId,
+                        );
+                        if (!fromPortEl || !toPortEl) continue;
+
+                        const p0Vp =
+                            graph.functions._getPortPointInViewport(fromPortEl);
+                        const p1Vp =
+                            graph.functions._getPortPointInViewport(toPortEl);
+                        if (!p0Vp || !p1Vp) continue;
+
+                        // Convert from viewport (screen) coords -> world coords.
+                        const p0W = graph.functions.screenToWorld(p0Vp.x, p0Vp.y);
+                        const p1W = graph.functions.screenToWorld(p1Vp.x, p1Vp.y);
+                        if (!p0W || !p1W) continue;
+
+                        // Convert world coords -> export-local coords.
+                        const p0 = {
+                            x: p0W.x - minX + pad,
+                            y: p0W.y - minY + pad,
+                        };
+                        const p1 = {
+                            x: p1W.x - minX + pad,
+                            y: p1W.y - minY + pad,
+                        };
+
+                        const fromRole = graph.functions._getPortRole(fromPortEl);
+                        const toRole = graph.functions._getPortRole(toPortEl);
+                        const side0 = fromRole === "input" ? -1 : 1;
+                        const side1 = toRole === "input" ? -1 : 1;
+
+                        const stroke = graph.functions._getWireStrokeForPorts(
+                            fromPortEl,
+                            toPortEl,
+                        );
+                        const strokeFinal = stroke || "#b7c7ff";
+
+                        const path = document.createElementNS(svgNS, "path");
+                        path.setAttribute("fill", "none");
+                        path.setAttribute("stroke", strokeFinal);
+                        path.setAttribute("stroke-width", String(baseWireWidth));
+                        path.setAttribute("stroke-linecap", "round");
+                        path.setAttribute(
+                            "d",
+                            graph.functions._buildBezierPath(p0, p1, side0, side1),
+                        );
+                        path.setAttribute("opacity", String(opacity));
+                        path.style.filter = `drop-shadow(0 0 4px ${graph.functions._colorWithAlpha(strokeFinal, 0.35)})`;
+                        g.appendChild(path);
+                    }
+                }
+
+                let built = 0;
+                const yieldEvery = Math.max(1, Number(opts.yieldEvery) || 1);
+                for (const n of selected) {
+                    const el = n?.element;
+                    const dom = el && el.length ? el[0] : null;
+                    if (!dom) continue;
+
+                    const leftRaw = el.css("left");
+                    const topRaw = el.css("top");
+                    const x = Number.parseFloat(String(leftRaw || "0")) || 0;
+                    const y = Number.parseFloat(String(topRaw || "0")) || 0;
+
+                    const clone = dom.cloneNode(true);
+
+                    // Avoid duplicate IDs in the document.
+                    try {
+                        if (clone.removeAttribute) clone.removeAttribute("id");
+                        clone.querySelectorAll?.("[id]").forEach((kid) => {
+                            kid.removeAttribute("id");
+                        });
+                    } catch {
+                        /* ignore */
+                    }
+
+                    // Remove selection/drag visuals in the exported image.
+                    try {
+                        clone.classList?.remove("selected");
+                        clone.classList?.remove("grabbing");
+                    } catch {
+                        /* ignore */
+                    }
+
+                    clone.style.position = "absolute";
+                    clone.style.left = x - minX + pad + "px";
+                    clone.style.top = y - minY + pad + "px";
+                    clone.style.transform = "none";
+                    clone.style.margin = "0";
+                    clone.style.pointerEvents = "none";
+                    root.appendChild(clone);
+
+                    built++;
+                    if (opts.yieldDuringBuild && built % yieldEvery === 0) {
+                        await yieldToBrowser();
+                    }
+                }
+
+                // One more yield so any UI updates can paint before rasterization.
+                await yieldToBrowser();
+
+                const ratio = Math.max(1, Number(opts.pixelRatio) || 1);
+                const bg = resolveCssColorForCanvas(opts.backgroundColor, root);
+                const extraH2cOpts =
+                    opts.html2canvasOptions && typeof opts.html2canvasOptions === "object"
+                        ? opts.html2canvasOptions
+                        : null;
+
+                // If requested, wait until idle time before the heavy rasterization step.
+                await runInIdleTime();
+
+                // Prefer html2canvas (lazy-load if requested).
+                if (typeof window.html2canvas !== "function") {
+                    await ensureHtml2Canvas();
+                }
+                if (typeof window.html2canvas === "function") {
+                    // Give the browser one last chance to paint.
+                    await yieldToBrowser();
+                    const canvas = await window.html2canvas(root, {
+                        backgroundColor: null,
+                        scale: ratio,
+                        useCORS: true,
+                        allowTaint: true,
+                        logging: false,
+                        foreignObjectRendering: opts.useForeignObjectRendering !== false,
+                        ...(extraH2cOpts || null),
+                    });
+
+                    // Make backgroundColor deterministic even if html2canvas produced transparency.
+                    if (bg != null && String(bg).trim().toLowerCase() !== "transparent") {
+                        const outCanvas = document.createElement("canvas");
+                        outCanvas.width = canvas.width;
+                        outCanvas.height = canvas.height;
+                        const ctx = outCanvas.getContext("2d");
+                        if (ctx) {
+                            ctx.fillStyle = bg;
+                            ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+                            ctx.drawImage(canvas, 0, 0);
+                            return outCanvas.toDataURL("image/png");
+                        }
+                    }
+
+                    return canvas.toDataURL("image/png");
+                }
+
+                // Fallback: dom-to-image, if present.
+                if (window.domtoimage && typeof window.domtoimage.toPng === "function") {
+                    const dtiOpts = {
+                        width: outW,
+                        height: outH,
+                        // dom-to-image expects a string; omit for transparent.
+                        ...(bg != null
+                            ? { bgcolor: String(bg) }
+                            : null),
+                        style: {
+                            transform: "scale(1)",
+                            transformOrigin: "top left",
+                        },
+                    };
+                    return await window.domtoimage.toPng(root, dtiOpts);
+                }
+
+                console.warn(
+                    "selectedNodesAsImage requires html2canvas (preferred) or dom-to-image to be loaded.",
+                );
+                return null;
+            } finally {
+                try {
+                    root.remove();
+                } catch {
+                    /* ignore */
+                }
+            }
+        },
+	}
 };

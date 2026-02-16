@@ -67,6 +67,13 @@ export const contextMenu = {
 					hidden: false,
 					disabled: true,
 				},
+				exportImage: {
+					id: 'contextExportImage',
+					element: null,
+					eventOnClick: 'contextExportImage',
+					hidden: false,
+					disabled: true,
+				},
 			}
 		},
 	},

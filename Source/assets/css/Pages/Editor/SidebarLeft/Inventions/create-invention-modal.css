@@ -1,0 +1,43 @@
+.create-invention-modal .modal-content .modal-body .invention-preview {
+  aspect-ratio: 16/9;
+  /*min-height: 15rem;*/
+  width: 100%;
+  /*height: 100%;*/
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  background-color: var(--rr-color-gradient-light);
+  border: var(--rr-border-width) solid var(--rr-color-outline);
+  border-radius: calc(var(--rr-border-radius) * 2);
+  background-position: center;
+  background-size: cover;
+}
+
+.create-invention-modal .modal-content .modal-body p {
+  font-family: 'Roboto';
+  margin: 0;
+}
+
+.create-invention-modal .modal-content .modal-body p.input-title {
+  margin-top: 1rem;
+  font-weight: 500;
+}
+
+.create-invention-modal .modal-content .modal-body textarea {
+  min-height: 4rem;
+}
+
+.create-invention-modal .modal-content .modal-body .rr-btn {
+  margin-top: 1rem;
+  gap: .5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.create-invention-modal .modal-content .modal-body .rr-btn span {
+  padding-top: .1rem;
+  font-weight: 500;
+}
+
